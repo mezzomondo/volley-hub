@@ -11,6 +11,7 @@ Definitions follow common volleyball analytics (DataVolley conventions):
 from . import db
 from .auth import User
 from .core import Forbidden, NotFound, _plain, _visible_matches_clause
+from .metrics import efficiency_sql
 
 # Serve evaluation -> reception evaluations that agree with it (DataVolley pairing).
 SERVE_RECEPTION_PAIRS = {"#": ["="], "/": ["/"], "+": ["-"], "!": ["!"], "-": ["+", "#"]}
@@ -253,7 +254,7 @@ def opponent_report(user: User, *, opponent: str, last_matches: int | None = Non
             join rally r on r.match_id = a.match_id and r.point_id = a.point_id
             left join person p on p.id = a.person_id
             where a.match_id = any(%(mids)s))"""
-    eff = "round(100.0 * (count(*) filter (where evaluation_code = '#') - count(*) filter (where evaluation_code in ('=', '/'))) / count(*), 1)"
+    srv_eff, att_eff = efficiency_sql("Serve"), efficiency_sql("Attack")
     pos = "round(100.0 * count(*) filter (where evaluation_code in ('#', '+')) / count(*), 1)"
 
     def q(sql: str) -> list[dict]:
@@ -267,7 +268,7 @@ def opponent_report(user: User, *, opponent: str, last_matches: int | None = Non
                    string_agg(distinct skill_type, ', ') as types,
                    round(100.0 * count(*) filter (where evaluation_code = '#') / count(*), 1) as ace_pct,
                    round(100.0 * count(*) filter (where evaluation_code = '=') / count(*), 1) as error_pct,
-                   {eff} as efficiency,
+                   {srv_eff} as efficiency,
                    (select string_agg(z, ' ') from (select 'z' || end_zone || ':' || count(*) as z from a s
                      where s.team_id = %(o)s and s.skill = 'Serve' and s.player = a.player and s.end_zone is not null
                      group by end_zone order by count(*) desc limit 4) t) as main_targets,
@@ -310,7 +311,7 @@ def opponent_report(user: User, *, opponent: str, last_matches: int | None = Non
                    round(100.0 * count(*) filter (where evaluation_code = '#') / count(*), 1) as kill_pct,
                    round(100.0 * count(*) filter (where evaluation_code = '=') / count(*), 1) as error_pct,
                    round(100.0 * count(*) filter (where evaluation_code = '/') / count(*), 1) as blocked_pct,
-                   {eff} as efficiency,
+                   {att_eff} as efficiency,
                    (select string_agg(z, ' ') from (select 'from ' || s.start_zone || ':' || count(*) as z from a s
                      where s.team_id = %(o)s and s.skill = 'Attack' and s.player = a.player and s.start_zone is not null
                      group by s.start_zone order by count(*) desc limit 3) t) as start_zones,

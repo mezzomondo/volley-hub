@@ -161,14 +161,16 @@ async def search_actions(player: str | None = None, team: str | None = None, opp
 async def stats(skill: str, group_by: str = "player", player: str | None = None, team: str | None = None,
                 opponent: str | None = None, match_id: int | None = None, skill_type: str | None = None,
                 attack_code: str | None = None, start_zone: int | None = None, end_zone: int | None = None,
-                end_cone: int | None = None, end_subzone: str | None = None,
+                end_cone: int | None = None, end_subzone: str | None = None, phase: str | None = None,
                 prev_skill: str | None = None, prev_evaluation: list[str] | None = None,
                 prev_skill_type: str | None = None, serve_type: str | None = None,
                 reception_evaluation: list[str] | None = None, setter_position: int | None = None,
                 late_set: bool | None = None) -> list[dict]:
     """Counts per evaluation code and percentages for one skill.
     group_by: player, team, match, skill_type, attack_code, set_number, start_zone, end_zone, end_cone,
-    end_subzone, direction (start zone with end zone or cone) or rotation (setter position of the team).
+    end_subzone, direction (start zone with end zone or cone), rotation (setter position of the team), phase
+    (Serve / Reception = side-out / Transition) or reception_quality (the team's own reception before the touch,
+    in the same possession: attack efficiency by pass quality); combine them with commas, e.g. "player,match".
     Zones and direction (court zones 1-9): start_zone is where the touch starts (attack: 4 = left, 3 = middle,
     2 = right, 9/8/7 = back row), end_zone where the ball lands, end_subzone A-D inside that zone. Some scouts
     record attack direction as end_cone (DataVolley cones, counted from the start zone) instead of end_zone; for
@@ -185,7 +187,7 @@ async def stats(skill: str, group_by: str = "player", player: str | None = None,
     return await _tool(core.stats, skill=skill, group_by=group_by, player=player, team=team,
                        opponent=opponent, match_id=match_id, skill_type=skill_type, attack_code=attack_code,
                        start_zone=start_zone, end_zone=end_zone, end_cone=end_cone, end_subzone=end_subzone,
-                       prev_skill=prev_skill, prev_evaluation=prev_evaluation,
+                       phase=phase, prev_skill=prev_skill, prev_evaluation=prev_evaluation,
                        prev_skill_type=prev_skill_type, serve_type=serve_type,
                        reception_evaluation=reception_evaluation, setter_position=setter_position, late_set=late_set)
 
@@ -359,14 +361,14 @@ async def api_stats(user: UserDep, skill: str, group_by: str = "player", player:
                     team: str | None = None, opponent: str | None = None, match_id: int | None = None,
                     skill_type: str | None = None, attack_code: str | None = None, start_zone: int | None = None,
                     end_zone: int | None = None, end_cone: int | None = None, end_subzone: str | None = None,
-                    prev_skill: str | None = None, prev_evaluation: Annotated[list[str] | None, Query()] = None,
+                    phase: str | None = None, prev_skill: str | None = None, prev_evaluation: Annotated[list[str] | None, Query()] = None,
                     prev_skill_type: str | None = None, serve_type: str | None = None,
                     reception_evaluation: Annotated[list[str] | None, Query()] = None,
                     setter_position: int | None = None, late_set: bool | None = None):
     return await _run(core.stats, user, skill=skill, group_by=group_by, player=player, team=team,
                       opponent=opponent, match_id=match_id, skill_type=skill_type, attack_code=attack_code,
                       start_zone=start_zone, end_zone=end_zone, end_cone=end_cone, end_subzone=end_subzone,
-                      prev_skill=prev_skill, prev_evaluation=prev_evaluation,
+                      phase=phase, prev_skill=prev_skill, prev_evaluation=prev_evaluation,
                       prev_skill_type=prev_skill_type, serve_type=serve_type,
                       reception_evaluation=reception_evaluation, setter_position=setter_position, late_set=late_set)
 

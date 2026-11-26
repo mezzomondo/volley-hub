@@ -8,6 +8,7 @@ from decimal import Decimal
 from psycopg import sql as pgsql
 
 from . import auth, config, db
+from .metrics import efficiency_sql
 from .auth import User
 
 SKILLS = ("Serve", "Reception", "Set", "Attack", "Block", "Dig", "Freeball")
@@ -106,12 +107,13 @@ def list_tags(user: User, match_id: int | None = None) -> list[dict]:
 
 ROTATION_EXPR = "case when a.team_id = m.home_team_id then r.home_setter_position else r.visiting_setter_position end"
 
-# Efficiency per skill (the season report's definitions): what counts as good and bad.
-EFFICIENCY = {
-    "Serve": (("#", "+", "/"), ("=", "-")),
-    "Reception": (("#", "+"), ("=", "-")),
-}
-DEFAULT_EFFICIENCY = (("#",), ("=", "/"))
+# The team's own reception in the same possession as the touch (opponent blocks do not break it).
+RECEPTION_QUALITY_EXPR = """(select rq.evaluation_code from action rq
+    where rq.match_id = a.match_id and rq.point_id = a.point_id and rq.team_id = a.team_id and rq.skill = 'Reception'
+      and rq.seq < a.seq and not exists (select 1 from action ox where ox.match_id = a.match_id
+          and ox.point_id = a.point_id and ox.team_id <> a.team_id and ox.skill <> 'Block'
+          and ox.seq > rq.seq and ox.seq < a.seq)
+    order by rq.seq desc limit 1)"""
 
 
 def _canonical_skill(skill: str) -> str:
@@ -251,7 +253,7 @@ def stats(user: User, *, skill: str, group_by: str = "player", player: str | Non
           team: str | None = None, opponent: str | None = None, match_id: int | None = None,
           skill_type: str | None = None, attack_code: str | None = None, start_zone: int | None = None,
           end_zone: int | None = None, end_cone: int | None = None, end_subzone: str | None = None,
-          prev_skill: str | None = None, prev_evaluation: list[str] | None = None,
+          phase: str | None = None, prev_skill: str | None = None, prev_evaluation: list[str] | None = None,
           prev_skill_type: str | None = None, serve_type: str | None = None,
           reception_evaluation: list[str] | None = None, setter_position: int | None = None,
           late_set: bool | None = None) -> list[dict]:
@@ -269,9 +271,13 @@ def stats(user: User, *, skill: str, group_by: str = "player", player: str | Non
         "end_subzone": [("a.end_subzone", "end_subzone")],
         "direction": [("a.start_zone", "start_zone"), ("a.end_zone", "end_zone"), ("a.end_cone", "end_cone")],
         "rotation": [(ROTATION_EXPR, "setter_position")],
+        "phase": [("a.phase", "phase")],
+        "reception_quality": [(RECEPTION_QUALITY_EXPR, "reception_quality")],
     }
-    if group_by not in groups:
-        raise ValueError(f"group_by must be one of {', '.join(groups)}")
+    keys = [k.strip() for k in group_by.split(",") if k.strip()]
+    unknown = [k for k in keys if k not in groups]
+    if not keys or unknown:
+        raise ValueError(f"group_by: one or more (comma separated) of {', '.join(groups)}")
     canonical = _canonical_skill(skill)
     vis, params = _visible_matches_clause(user)
     where = [vis, "a.skill = %(skill)s"]
@@ -280,8 +286,9 @@ def stats(user: User, *, skill: str, group_by: str = "player", player: str | Non
     _context_filters(where, params, prev_skill=prev_skill, prev_evaluation=prev_evaluation,
                      prev_skill_type=prev_skill_type, serve_type=serve_type,
                      reception_evaluation=reception_evaluation, setter_position=setter_position, late_set=late_set)
-    good, bad = EFFICIENCY.get(canonical, DEFAULT_EFFICIENCY)
-    params["eff_good"], params["eff_bad"] = list(good), list(bad)
+    if phase:
+        where.append("a.phase ilike %(phase)s")
+        params["phase"] = phase
     for key, clause, value in (
         ("player", "p.full_name ilike %(player)s", f"%{player}%" if player else None),
         ("team", "t.name ilike %(team)s", f"%{team}%" if team else None),
@@ -296,7 +303,7 @@ def stats(user: User, *, skill: str, group_by: str = "player", player: str | Non
         where.append("""exists (select 1 from team o where o.id in (m.home_team_id, m.visiting_team_id)
                         and o.id <> a.team_id and o.name ilike %(opponent)s)""")
         params["opponent"] = f"%{opponent}%"
-    cols = groups[group_by]
+    cols = list(dict.fromkeys(c for k in keys for c in groups[k]))
     select_cols = ", ".join(f"{expr} as {name}" for expr, name in cols)
     group_cols = ", ".join(expr for expr, _ in cols)
     result = db.fetch_all(f"""
@@ -311,8 +318,7 @@ def stats(user: User, *, skill: str, group_by: str = "player", player: str | Non
                round(100.0 * count(*) filter (where a.evaluation_code = '#') / count(*), 1) as pct_perfect_or_point,
                round(100.0 * count(*) filter (where a.evaluation_code in ('#', '+')) / count(*), 1) as pct_positive,
                round(100.0 * count(*) filter (where a.evaluation_code = '=') / count(*), 1) as pct_error,
-               round(100.0 * (count(*) filter (where a.evaluation_code = any(%(eff_good)s))
-                              - count(*) filter (where a.evaluation_code = any(%(eff_bad)s))) / count(*), 1) as efficiency
+               {efficiency_sql(canonical, "a.evaluation_code")} as efficiency
         from action a
         join match m on m.id = a.match_id
         join team h on h.id = m.home_team_id

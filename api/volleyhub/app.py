@@ -1,14 +1,13 @@
-"""HTTP entry point: REST API (OpenAPI at /docs), MCP server at /mcp, signed media."""
+"""HTTP entry point: MCP server at /mcp, REST API (schema at /openapi.json), signed media files. No web pages."""
 
 import contextvars
-import html
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
 import anyio
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse
 from urllib.parse import urlparse
 
 from mcp.server.mcpserver import MCPServer
@@ -21,7 +20,7 @@ from .auth import User
 # ------------------------------------------------------------------ auth plumbing
 
 _current_user: contextvars.ContextVar[User | None] = contextvars.ContextVar("current_user", default=None)
-PUBLIC_PREFIXES = ("/healthz", "/media/", "/watch/", "/docs", "/openapi.json", "/redoc")
+PUBLIC_PREFIXES = ("/healthz", "/media/", "/openapi.json")
 
 
 class AuthMiddleware:
@@ -123,7 +122,7 @@ async def search_actions(player: str | None = None, team: str | None = None, opp
                          phase: str | None = None, limit: int = 100) -> list[dict]:
     """Find touches. All filters optional and combined with AND. player/team/opponent are partial names.
     evaluation is a list of codes, e.g. ['=', '/'] for errors and blocked attacks.
-    phase: Serve, Reception (side-out) or Transition. Each result has a watch_url (±4 s)."""
+    phase: Serve, Reception (side-out) or Transition. Results with video have a video_url: the match video starting 4 s before the touch (signed link, a file, no page). To watch or share a touch, prefer create_clip."""
     return await _tool(core.search_actions, player=player, team=team, opponent=opponent, match_id=match_id,
                        skill=skill, evaluation=evaluation, skill_type=skill_type, attack_code=attack_code,
                        set_number=set_number, phase=phase, limit=limit)
@@ -180,7 +179,7 @@ async def lifespan(_app: FastAPI):
         yield
 
 
-app = FastAPI(title="volley-hub", version="0.1.0", lifespan=lifespan,
+app = FastAPI(title="volley-hub", version="0.1.0", lifespan=lifespan, docs_url=None, redoc_url=None,
               description="Match data, video and clips. Authenticate with `Authorization: Bearer <token>`.")
 UserDep = Annotated[User, Depends(rest_user)]
 
@@ -293,37 +292,10 @@ def media_video(request: Request, match_id: int):
     return FileResponse(_safe_file(config.VIDEO_DIR, row["storage_key"]), media_type="video/mp4")
 
 
-@app.get("/watch/{match_id}", include_in_schema=False, response_class=HTMLResponse)
-def watch(request: Request, match_id: int, t: float = 0, e: float | None = None):
-    _require_signature(request)
-    info = db.fetch_one("""
-        select m.played_on, h.name as home, v.name as visiting from match m
-        join team h on h.id = m.home_team_id join team v on v.id = m.visiting_team_id where m.id = %s""",
-        (match_id,))
-    if info is None:
-        raise HTTPException(404, "not found")
-    video = auth.signed_url(f"/media/videos/{match_id}", ttl=6 * 3600)
-    end = e if e is not None else t + 8
-    title = html.escape(f"{info['home']} vs {info['visiting']}, {info['played_on']}")
-    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>{title}</title>
-<style>body{{margin:0;background:#111;color:#eee;font:15px system-ui,sans-serif}}
-main{{max-width:1100px;margin:0 auto;padding:16px}}video{{width:100%;background:#000;border-radius:6px}}
-button{{font:inherit;padding:6px 12px;margin-top:8px}}</style></head>
-<body><main><h1 style="font-size:18px">{title}</h1>
-<video id="v" controls playsinline preload="metadata" src="{html.escape(video)}#t={t:.1f},{end:.1f}"></video>
-<div><button onclick="var v=document.getElementById('v');v.currentTime={t:.1f};v.play()">Replay</button>
-<span style="opacity:.7">&nbsp;{t:.0f}s to {end:.0f}s, then the video keeps going if you press play.</span></div>
-</main></body></html>"""
-
-
-@app.get("/", include_in_schema=False, response_class=HTMLResponse)
+@app.get("/", include_in_schema=False)
 def index():
-    return """<!doctype html><html lang="en"><head><meta charset="utf-8"><title>volley-hub</title></head>
-<body style="font:15px system-ui;max-width:640px;margin:40px auto;padding:0 16px">
-<h1>volley-hub</h1><p>Match data, video and clips.</p>
-<ul><li>MCP endpoint: <code>/mcp</code> (Bearer token)</li><li>REST API: <a href="/docs">/docs</a></li></ul>
-</body></html>"""
+    return {"name": "volley-hub", "mcp": f"{config.PUBLIC_URL}/mcp", "openapi": f"{config.PUBLIC_URL}/openapi.json",
+            "auth": "Authorization: Bearer <token>"}
 
 
 # MCP last: its app serves /mcp; everything above takes precedence.

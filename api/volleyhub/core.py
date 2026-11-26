@@ -38,8 +38,9 @@ def _plain(rows: list[dict]) -> list[dict]:
     return out
 
 
-def watch_url(match_id: int, start: float, end: float) -> str:
-    return auth.signed_url(f"/watch/{match_id}", {"t": round(start, 1), "e": round(end, 1)})
+def video_url(match_id: int, start: float, end: float) -> str:
+    """Signed link to the match video file; the #t fragment makes players start (and stop) at the touch."""
+    return f"{auth.signed_url(f'/media/videos/{match_id}')}#t={start:.0f},{end:.0f}"
 
 
 # ------------------------------------------------------------------ catalogue
@@ -97,7 +98,7 @@ def list_tags(user: User, match_id: int | None = None) -> list[dict]:
     for r in rows:
         if r["video_time_s"] is not None:
             t = float(r["video_time_s"])
-            r["watch_url"] = watch_url(r["match_id"], max(0, t - 4), t + 4)
+            r["video_url"] = video_url(r["match_id"], max(0, t - 4), t + 4)
     return _plain(rows)
 
 
@@ -164,7 +165,7 @@ def search_actions(user: User, *, player: str | None = None, team: str | None = 
     for r in rows:
         if r["has_video"] and r["video_time_s"] is not None:
             t = float(r["video_time_s"])
-            r["watch_url"] = watch_url(r["match_id"], max(0, t - 4), t + 4)
+            r["video_url"] = video_url(r["match_id"], max(0, t - 4), t + 4)
     return _plain(rows)
 
 

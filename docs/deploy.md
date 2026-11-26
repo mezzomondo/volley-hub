@@ -65,7 +65,8 @@ Clients that accept a bearer header work today, for example:
 Web apps that only offer OAuth sign-in for connectors (claude.ai, ChatGPT) need the OAuth server,
 which is the next step on the roadmap.
 
-Without MCP: the same functions are a REST API, documented at `https://<host>/docs`.
+Without MCP: the same functions are a REST API, described by `https://<host>/openapi.json`.
+There are no web pages: clips and match videos are signed links to mp4 files (valid 7 days).
 
 ## Schema changes
 

@@ -14,13 +14,23 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field
 
-from . import auth, config, core, db
+from . import auth, config, core, db, migrate, oauth
 from .auth import User
 
 # ------------------------------------------------------------------ auth plumbing
 
 _current_user: contextvars.ContextVar[User | None] = contextvars.ContextVar("current_user", default=None)
-PUBLIC_PREFIXES = ("/healthz", "/media/", "/openapi.json")
+PUBLIC_PREFIXES = ("/healthz", "/media/", "/openapi.json") + oauth.PUBLIC_PATHS
+
+
+def _user_for_bearer(token: str | None) -> User | None:
+    """Personal access codes (Claude Code, scripts) or OAuth access tokens (connectors)."""
+    if not token:
+        return None
+    return auth.user_for_token(token) or oauth.user_for_access_token(token)
+
+
+_WWW_AUTH = f'Bearer realm="volley-hub", resource_metadata="{oauth.RESOURCE_METADATA_URL}"'.encode()
 
 
 class AuthMiddleware:
@@ -33,12 +43,12 @@ class AuthMiddleware:
         if scope["type"] != "http" or scope["path"] == "/" or scope["path"].startswith(PUBLIC_PREFIXES):
             return await self.app(scope, receive, send)
         headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
-        user = await anyio.to_thread.run_sync(auth.user_for_token, auth.bearer(headers))
+        user = await anyio.to_thread.run_sync(_user_for_bearer, auth.bearer(headers))
         if user is None:
             body = b'{"detail":"missing or invalid bearer token"}'
             await send({"type": "http.response.start", "status": 401,
                         "headers": [(b"content-type", b"application/json"),
-                                    (b"www-authenticate", b'Bearer realm="volley-hub"')]})
+                                    (b"www-authenticate", _WWW_AUTH)]})
             await send({"type": "http.response.body", "body": body})
             return
         scope.setdefault("state", {})["user"] = user
@@ -175,6 +185,8 @@ async def query(sql: str, limit: int = 200) -> list[dict]:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     db.pool()
+    for name in await anyio.to_thread.run_sync(migrate.migrate):
+        print(f"applied migration {name}", flush=True)
     async with mcp.session_manager.run():
         yield
 
@@ -298,7 +310,8 @@ def index():
             "auth": "Authorization: Bearer <token>"}
 
 
-# MCP last: its app serves /mcp; everything above takes precedence.
+# OAuth endpoints and the sign-in page, then MCP last: its app serves /mcp; everything above takes precedence.
+app.router.routes.extend(oauth.routes())
 _public_host = urlparse(config.PUBLIC_URL).netloc
 app.mount("/", mcp.streamable_http_app(
     stateless_http=True,

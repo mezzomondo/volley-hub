@@ -54,21 +54,41 @@ read-only `query` tool (SQL) and staff notes.
 
 ## Connecting an AI assistant (MCP)
 
-Endpoint: `https://<host>/mcp`, header `Authorization: Bearer <token>`.
+Everyone gets a personal **access code** from `vh user create-user` (send it privately). With it:
 
-Clients that accept a bearer header work today, for example:
+**Apps with connectors (Claude desktop, web and mobile, ChatGPT and other OAuth clients)**
 
-- Claude Code: `claude mcp add --transport http volley-hub https://<host>/mcp --header "Authorization: Bearer <token>"`
-- Cursor / VS Code / Windsurf / Gemini CLI: add an HTTP MCP server with the same URL and header.
-- Open WebUI, LibreChat (any model, including local ones): add an MCP (streamable HTTP) tool server with the URL and header.
+1. Add a custom connector (in Claude: Settings, Connectors, Add custom connector) with the URL
+   `https://<host>/mcp`. Nothing else to fill in.
+2. Press Connect: a sign-in page opens. Paste the access code once.
+3. Done. The app stays connected (it renews its own tokens for up to 90 days of inactivity).
 
-Web apps that only offer OAuth sign-in for connectors (claude.ai, ChatGPT) need the OAuth server,
-which is the next step on the roadmap.
+Revoking someone (`vh user revoke --name ...`) or issuing a new code (`vh user rotate-token --name ...`)
+signs out every app they connected.
 
-Without MCP: the same functions are a REST API, described by `https://<host>/openapi.json`.
-There are no web pages: clips and match videos are signed links to mp4 files (valid 7 days).
+**Developer tools that accept a header (Claude Code, Cursor, VS Code, Gemini CLI, LibreChat...)**
+can also use the code directly as a bearer token:
+
+```sh
+claude mcp add --transport http volley-hub https://<host>/mcp --header "Authorization: Bearer <access code>"
+```
+
+**Scripts:** the same functions are a REST API (`https://<host>/api/...`, schema at
+`https://<host>/openapi.json`), with the same header.
+
+There are no web pages apart from the sign-in form: clips and match videos are signed links to mp4
+files (valid 7 days).
+
+### How sign-in works
+
+volley-hub is its own OAuth 2.1 authorization server, as the MCP specification describes: protected
+resource metadata (RFC 9728) at `/.well-known/oauth-protected-resource/mcp`, server metadata
+(RFC 8414), dynamic client registration (RFC 7591), authorization code with PKCE (S256), rotating
+refresh tokens and revocation (RFC 7009). Access tokens last one hour. Codes and tokens are stored
+only as SHA-256 hashes. Redirect URIs must be https, a loopback http address or an app scheme.
 
 ## Schema changes
 
-`db/schema.sql` runs only when the database is created. Changes after that need a migration
-(planned); until then apply them by hand with `vh run`.
+`db/schema.sql` is the baseline and runs only when the database is created. Later changes are SQL
+files in `api/volleyhub/migrations/` (`002_something.sql`, ...): the API applies the new ones at start,
+once, in order, and records them in `schema_migration`. `vh update` is enough to roll them out.

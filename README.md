@@ -10,7 +10,7 @@ the interface, and the hub only hands back data and links to clips and video.
 A plain REST/OpenAPI interface does the same for scripts. No vendor lock-in: everything runs in
 Docker Compose on one VM.
 
-Status: early but working: schema, .dvw ingest, REST API, MCP server, clip worker and AWS deployment (see `docs/deploy.md`). Next: OAuth sign-in, so web assistants (claude.ai, ChatGPT) can connect too.
+Status: early but working: schema, .dvw ingest, REST API, MCP server, clip worker, OAuth and AWS deployment (see `docs/deploy.md`). OAuth sign-in for connectors (Claude, ChatGPT...): add the URL, paste your access code once.
 
 ## Architecture
 

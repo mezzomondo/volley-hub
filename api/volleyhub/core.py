@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from psycopg import sql as pgsql
 
-from . import auth, db
+from . import auth, config, db
 from .auth import User
 
 SKILLS = ("Serve", "Reception", "Set", "Attack", "Block", "Dig", "Freeball")
@@ -104,6 +104,62 @@ def list_tags(user: User, match_id: int | None = None) -> list[dict]:
 
 # ------------------------------------------------------------------ actions
 
+ROTATION_EXPR = "case when a.team_id = m.home_team_id then r.home_setter_position else r.visiting_setter_position end"
+
+# Efficiency per skill (the season report's definitions): what counts as good and bad.
+EFFICIENCY = {
+    "Serve": (("#", "+", "/"), ("=", "-")),
+    "Reception": (("#", "+"), ("=", "-")),
+}
+DEFAULT_EFFICIENCY = (("#",), ("=", "/"))
+
+
+def _canonical_skill(skill: str) -> str:
+    canonical = next((s for s in SKILLS if s.lower() == skill.lower()), None)
+    if canonical is None:
+        raise ValueError(f"skill must be one of {', '.join(SKILLS)}")
+    return canonical
+
+
+def _context_filters(where: list[str], params: dict, *, prev_skill=None, prev_evaluation=None, prev_skill_type=None,
+                     serve_type=None, reception_evaluation=None, setter_position=None, late_set=None) -> None:
+    """Rally context (needs aliases a = action, m = match, r = rally).
+
+    prev_*: an earlier touch of the same team in the same possession (opponent blocks do not break it);
+    for prev_skill='Serve' it is simply the rally's serve. serve_type / reception_evaluation describe the
+    rally's serve and reception. setter_position is the rotation of the touch's team (setter in P1-P6).
+    late_set: from 20 (12 in the fifth set) for either team.
+    """
+    if prev_skill:
+        prev = _canonical_skill(prev_skill)
+        cond = ["pv.match_id = a.match_id", "pv.point_id = a.point_id", "pv.seq < a.seq", "pv.skill = %(prev_skill)s"]
+        params["prev_skill"] = prev
+        if prev != "Serve":
+            cond += ["pv.team_id = a.team_id",
+                     """not exists (select 1 from action ox where ox.match_id = a.match_id and ox.point_id = a.point_id
+                        and ox.team_id <> a.team_id and ox.skill <> 'Block' and ox.seq > pv.seq and ox.seq < a.seq)"""]
+        if prev_evaluation:
+            cond.append("pv.evaluation_code = any(%(prev_evaluation)s)")
+            params["prev_evaluation"] = list(prev_evaluation)
+        if prev_skill_type:
+            cond.append("pv.skill_type ilike %(prev_skill_type)s")
+            params["prev_skill_type"] = f"%{prev_skill_type}%"
+        where.append(f"exists (select 1 from action pv where {' and '.join(cond)})")
+    if serve_type:
+        where.append("""exists (select 1 from action sv where sv.match_id = a.match_id and sv.point_id = a.point_id
+                        and sv.skill = 'Serve' and sv.skill_type ilike %(serve_type)s)""")
+        params["serve_type"] = f"%{serve_type}%"
+    if reception_evaluation:
+        where.append("""exists (select 1 from action rc where rc.match_id = a.match_id and rc.point_id = a.point_id
+                        and rc.skill = 'Reception' and rc.evaluation_code = any(%(reception_evaluation)s))""")
+        params["reception_evaluation"] = list(reception_evaluation)
+    if setter_position:
+        where.append(f"{ROTATION_EXPR} = %(setter_position)s")
+        params["setter_position"] = int(setter_position)
+    if late_set:
+        where.append("greatest(r.home_score_start, r.visiting_score_start) >= case when r.set_number = 5 then 12 else 20 end")
+
+
 def _zone_filters(where: list[str], params: dict, start_zone, end_zone, end_cone, end_subzone) -> None:
     """Court zones are 1-9. A scout records the attack direction as end_zone or as end_cone, not both."""
     for col, value in (("start_zone", start_zone), ("end_zone", end_zone), ("end_cone", end_cone)):
@@ -120,11 +176,17 @@ def search_actions(user: User, *, player: str | None = None, team: str | None = 
                    evaluation: list[str] | None = None, skill_type: str | None = None,
                    attack_code: str | None = None, set_number: int | None = None,
                    phase: str | None = None, start_zone: int | None = None, end_zone: int | None = None,
-                   end_cone: int | None = None, end_subzone: str | None = None,
+                   end_cone: int | None = None, end_subzone: str | None = None, prev_skill: str | None = None, prev_evaluation: list[str] | None = None,
+                   prev_skill_type: str | None = None, serve_type: str | None = None,
+                   reception_evaluation: list[str] | None = None, setter_position: int | None = None,
+                   late_set: bool | None = None, 
                    limit: int = 100) -> list[dict]:
     vis, params = _visible_matches_clause(user)
     where = [vis]
     _zone_filters(where, params, start_zone, end_zone, end_cone, end_subzone)
+    _context_filters(where, params, prev_skill=prev_skill, prev_evaluation=prev_evaluation,
+                     prev_skill_type=prev_skill_type, serve_type=serve_type,
+                     reception_evaluation=reception_evaluation, setter_position=setter_position, late_set=late_set)
     if player:
         where.append("(p.full_name ilike %(player)s or %(player_exact)s ilike any(p.aliases))")
         params.update(player=f"%{player}%", player_exact=player)
@@ -166,7 +228,7 @@ def search_actions(user: User, *, player: str | None = None, team: str | None = 
                t.name as team, a.shirt_number, p.full_name as player,
                a.skill, a.skill_type, a.evaluation_code, a.evaluation, a.attack_code, a.set_code,
                a.start_zone, a.end_zone, a.end_zone_source, a.end_subzone, a.end_cone,
-               a.start_x, a.start_y, a.end_x, a.end_y, a.phase, a.video_time_s, a.code,
+               a.start_x, a.start_y, a.end_x, a.end_y, a.phase, {ROTATION_EXPR} as setter_position, a.video_time_s, a.code,
                exists (select 1 from video where match_id = a.match_id) as has_video
         from action a
         join match m on m.id = a.match_id
@@ -174,6 +236,7 @@ def search_actions(user: User, *, player: str | None = None, team: str | None = 
         join team v on v.id = m.visiting_team_id
         join team t on t.id = a.team_id
         left join person p on p.id = a.person_id
+        join rally r on r.match_id = a.match_id and r.point_id = a.point_id
         where {' and '.join(where)}
         order by m.played_on, a.seq
         limit %(limit)s""", params)
@@ -187,7 +250,11 @@ def search_actions(user: User, *, player: str | None = None, team: str | None = 
 def stats(user: User, *, skill: str, group_by: str = "player", player: str | None = None,
           team: str | None = None, opponent: str | None = None, match_id: int | None = None,
           skill_type: str | None = None, attack_code: str | None = None, start_zone: int | None = None,
-          end_zone: int | None = None, end_cone: int | None = None, end_subzone: str | None = None) -> list[dict]:
+          end_zone: int | None = None, end_cone: int | None = None, end_subzone: str | None = None,
+          prev_skill: str | None = None, prev_evaluation: list[str] | None = None,
+          prev_skill_type: str | None = None, serve_type: str | None = None,
+          reception_evaluation: list[str] | None = None, setter_position: int | None = None,
+          late_set: bool | None = None) -> list[dict]:
     """Counts per evaluation code plus the usual percentages for one skill."""
     groups = {
         "player": [("p.full_name", "player"), ("t.name", "team")],
@@ -201,16 +268,20 @@ def stats(user: User, *, skill: str, group_by: str = "player", player: str | Non
         "end_cone": [("a.end_cone", "end_cone")],
         "end_subzone": [("a.end_subzone", "end_subzone")],
         "direction": [("a.start_zone", "start_zone"), ("a.end_zone", "end_zone"), ("a.end_cone", "end_cone")],
+        "rotation": [(ROTATION_EXPR, "setter_position")],
     }
     if group_by not in groups:
         raise ValueError(f"group_by must be one of {', '.join(groups)}")
-    canonical = next((s for s in SKILLS if s.lower() == skill.lower()), None)
-    if canonical is None:
-        raise ValueError(f"skill must be one of {', '.join(SKILLS)}")
+    canonical = _canonical_skill(skill)
     vis, params = _visible_matches_clause(user)
     where = [vis, "a.skill = %(skill)s"]
     params["skill"] = canonical
     _zone_filters(where, params, start_zone, end_zone, end_cone, end_subzone)
+    _context_filters(where, params, prev_skill=prev_skill, prev_evaluation=prev_evaluation,
+                     prev_skill_type=prev_skill_type, serve_type=serve_type,
+                     reception_evaluation=reception_evaluation, setter_position=setter_position, late_set=late_set)
+    good, bad = EFFICIENCY.get(canonical, DEFAULT_EFFICIENCY)
+    params["eff_good"], params["eff_bad"] = list(good), list(bad)
     for key, clause, value in (
         ("player", "p.full_name ilike %(player)s", f"%{player}%" if player else None),
         ("team", "t.name ilike %(team)s", f"%{team}%" if team else None),
@@ -240,14 +311,15 @@ def stats(user: User, *, skill: str, group_by: str = "player", player: str | Non
                round(100.0 * count(*) filter (where a.evaluation_code = '#') / count(*), 1) as pct_perfect_or_point,
                round(100.0 * count(*) filter (where a.evaluation_code in ('#', '+')) / count(*), 1) as pct_positive,
                round(100.0 * count(*) filter (where a.evaluation_code = '=') / count(*), 1) as pct_error,
-               round(100.0 * (count(*) filter (where a.evaluation_code = '#')
-                              - count(*) filter (where a.evaluation_code in ('=', '/'))) / count(*), 1) as efficiency
+               round(100.0 * (count(*) filter (where a.evaluation_code = any(%(eff_good)s))
+                              - count(*) filter (where a.evaluation_code = any(%(eff_bad)s))) / count(*), 1) as efficiency
         from action a
         join match m on m.id = a.match_id
         join team h on h.id = m.home_team_id
         join team v on v.id = m.visiting_team_id
         join team t on t.id = a.team_id
         left join person p on p.id = a.person_id
+        join rally r on r.match_id = a.match_id and r.point_id = a.point_id
         where {' and '.join(where)}
         group by {group_cols}
         order by total desc""", params)
@@ -273,7 +345,8 @@ def _default_caption(a: dict) -> str:
 
 def create_clip(user: User, *, action_ids: list[int] | None = None, tag_ids: list[int] | None = None,
                 caption: str | None = None, title: str | None = None, before_s: float = 4.0,
-                after_s: float = 4.0, slow_motion: bool = True) -> dict:
+                after_s: float = 4.0, slow_motion: bool = True,
+                skill_offsets: dict[str, float] | None = None) -> dict:
     """Queue a clip made of one segment per action/tag. The same request returns the same clip."""
     action_ids = list(dict.fromkeys(action_ids or []))
     tag_ids = list(dict.fromkeys(tag_ids or []))
@@ -281,6 +354,8 @@ def create_clip(user: User, *, action_ids: list[int] | None = None, tag_ids: lis
         raise ValueError("give action_ids and/or tag_ids")
     if len(action_ids) + len(tag_ids) > 60:
         raise ValueError("at most 60 segments per clip")
+    offsets = dict(config.CLIP_SKILL_OFFSETS if skill_offsets is None else skill_offsets)
+    offsets = {_canonical_skill(k): max(-10.0, min(float(v), 10.0)) for k, v in offsets.items()}
     before_s = max(0.0, min(float(before_s), 30.0))
     after_s = max(0.0, min(float(after_s), 30.0))
     vis, params = _visible_matches_clause(user)
@@ -308,7 +383,7 @@ def create_clip(user: User, *, action_ids: list[int] | None = None, tag_ids: lis
             r = found[i]
             if not r["storage_key"] or r["video_time_s"] is None:
                 raise ValueError(f"action {i} has no video")
-            t = float(r["video_time_s"])
+            t = float(r["video_time_s"]) + offsets.get(r["skill"], 0.0)  # recorded late? shift per skill
             segments.append({"match_id": r["match_id"], "video": r["storage_key"],
                              "start": round(max(0.0, t - before_s), 2), "end": round(t + after_s, 2),
                              "slowmo": [round(max(0.0, t - 1), 2), round(t + 1, 2)] if slow_motion else None,

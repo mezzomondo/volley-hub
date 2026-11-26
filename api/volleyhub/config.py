@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -17,3 +18,5 @@ CLIP_DIR = Path(_env("CLIP_DIR", "/data/clips"))
 FONT_FILE = _env("FONT_FILE", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
 # How long signed media links stay valid.
 MEDIA_LINK_TTL_S = int(_env("MEDIA_LINK_TTL_S", str(7 * 24 * 3600)))
+# Seconds to shift each skill's video time in clips, e.g. {"Serve": -1.5} when serves are recorded late.
+CLIP_SKILL_OFFSETS = json.loads(_env("CLIP_SKILL_OFFSETS", "{}"))

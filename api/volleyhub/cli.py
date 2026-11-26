@@ -9,7 +9,7 @@
 import argparse
 import sys
 
-from . import auth, db, oauth
+from . import analysis, auth, db, oauth
 
 
 def _team_ids(names: list[str]) -> list[int]:
@@ -34,6 +34,9 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--name", required=True)
     t = sub.add_parser("rotate-token")
     t.add_argument("--name", required=True)
+    k = sub.add_parser("scout-check", help="list scouting inconsistencies of one match")
+    k.add_argument("--match-id", type=int)
+    k.add_argument("--source-file", help="the .dvw file name the match was loaded from")
     args = ap.parse_args(argv)
 
     if args.cmd == "create-user":
@@ -57,6 +60,20 @@ def main(argv: list[str] | None = None) -> None:
             if row:
                 oauth.revoke_user_sessions(conn, row["id"])
         print("revoked, connected apps signed out" if row else "no such user")
+    elif args.cmd == "scout-check":
+        match_id = args.match_id
+        if args.source_file:
+            row = db.fetch_one("select id from match where source_file = %s order by ingested_at desc limit 1",
+                               (args.source_file,))
+            if row is None:
+                sys.exit(f"no match loaded from {args.source_file}")
+            match_id = row["id"]
+        findings = analysis.scout_check(auth.User(0, "cli", "staff"), match_id=match_id)
+        print(f"scout check: {len(findings)} findings" + (" (ask your AI for scout_check to see them with clips)"
+                                                          if findings else ""))
+        for f in findings:
+            where = f"set {f['set_number']} {f['score']}" if f["score"] else (f"set {f['set_number']}" if f["set_number"] else "")
+            print(f"  [{f['rule']}] match {f['match_id']} {where}: {f['message']}")
     elif args.cmd == "rotate-token":
         token = auth.new_token()
         with db.conn() as conn:

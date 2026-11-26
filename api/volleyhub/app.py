@@ -14,7 +14,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field
 
-from . import auth, config, core, db, migrate, oauth
+from . import analysis, auth, config, core, db, migrate, oauth
 from .auth import User
 
 # ------------------------------------------------------------------ auth plumbing
@@ -131,7 +131,10 @@ async def search_actions(player: str | None = None, team: str | None = None, opp
                          attack_code: str | None = None, set_number: int | None = None,
                          phase: str | None = None, start_zone: int | None = None, end_zone: int | None = None,
                          end_cone: int | None = None, end_subzone: str | None = None,
-                         limit: int = 100) -> list[dict]:
+                         prev_skill: str | None = None, prev_evaluation: list[str] | None = None,
+                         prev_skill_type: str | None = None, serve_type: str | None = None,
+                         reception_evaluation: list[str] | None = None, setter_position: int | None = None,
+                         late_set: bool | None = None, limit: int = 100) -> list[dict]:
     """Find touches. All filters optional and combined with AND. player/team/opponent are partial names.
     evaluation is a list of codes, e.g. ['=', '/'] for errors and blocked attacks.
     phase: Serve, Reception (side-out) or Transition. Results with video have a video_url: the match video starting 4 s before the touch (signed link, a file, no page). To watch or share a touch, prefer create_clip.
@@ -140,43 +143,95 @@ async def search_actions(player: str | None = None, team: str | None = None, opp
     record attack direction as end_cone (DataVolley cones, counted from the start zone) instead of end_zone; for
     serves and attacks end_zone is then computed from the end coordinates (end_zone_source 'coordinates' instead
     of 'code': less precise). start_x/start_y/end_x/end_y are court coordinates (x 0.5-3.5 across, y 0.5-6.5
-    along the court, net at y 3.5), for heatmaps."""
+    along the court, net at y 3.5), for heatmaps.
+    Rally context: prev_skill (+ prev_evaluation, prev_skill_type) keeps touches that come after such a touch of
+    the same team in the same possession, e.g. skill='Attack', prev_skill='Reception', prev_evaluation=['#'] =
+    attacks after a perfect pass; prev_skill='Dig' = attacks after a dig. serve_type filters on the rally's serve
+    (e.g. 'jump-float'), reception_evaluation on the rally's reception. setter_position = rotation (setter in
+    P1-P6) of the touch's team. late_set = from 20 (12 in the fifth set)."""
     return await _tool(core.search_actions, player=player, team=team, opponent=opponent, match_id=match_id,
                        skill=skill, evaluation=evaluation, skill_type=skill_type, attack_code=attack_code,
                        set_number=set_number, phase=phase, start_zone=start_zone, end_zone=end_zone,
-                       end_cone=end_cone, end_subzone=end_subzone, limit=limit)
+                       end_cone=end_cone, end_subzone=end_subzone, prev_skill=prev_skill, prev_evaluation=prev_evaluation,
+                       prev_skill_type=prev_skill_type, serve_type=serve_type,
+                       reception_evaluation=reception_evaluation, setter_position=setter_position, late_set=late_set, limit=limit)
 
 
 @mcp.tool()
 async def stats(skill: str, group_by: str = "player", player: str | None = None, team: str | None = None,
                 opponent: str | None = None, match_id: int | None = None, skill_type: str | None = None,
                 attack_code: str | None = None, start_zone: int | None = None, end_zone: int | None = None,
-                end_cone: int | None = None, end_subzone: str | None = None) -> list[dict]:
+                end_cone: int | None = None, end_subzone: str | None = None,
+                prev_skill: str | None = None, prev_evaluation: list[str] | None = None,
+                prev_skill_type: str | None = None, serve_type: str | None = None,
+                reception_evaluation: list[str] | None = None, setter_position: int | None = None,
+                late_set: bool | None = None) -> list[dict]:
     """Counts per evaluation code and percentages for one skill.
     group_by: player, team, match, skill_type, attack_code, set_number, start_zone, end_zone, end_cone,
-    end_subzone or direction (start zone with end zone or cone).
+    end_subzone, direction (start zone with end zone or cone) or rotation (setter position of the team).
     Zones and direction (court zones 1-9): start_zone is where the touch starts (attack: 4 = left, 3 = middle,
     2 = right, 9/8/7 = back row), end_zone where the ball lands, end_subzone A-D inside that zone. Some scouts
     record attack direction as end_cone (DataVolley cones, counted from the start zone) instead of end_zone; for
     serves and attacks end_zone is then computed from the end coordinates (end_zone_source 'coordinates' instead
     of 'code': less precise). start_x/start_y/end_x/end_y are court coordinates (x 0.5-3.5 across, y 0.5-6.5
     along the court, net at y 3.5), for heatmaps.
-    efficiency = (# minus = minus /) / total, in percent (for attack: kill minus errors minus blocked)."""
+    Rally context: prev_skill (+ prev_evaluation, prev_skill_type) keeps touches that come after such a touch of
+    the same team in the same possession, e.g. skill='Attack', prev_skill='Reception', prev_evaluation=['#'] =
+    attacks after a perfect pass; prev_skill='Dig' = attacks after a dig. serve_type filters on the rally's serve
+    (e.g. 'jump-float'), reception_evaluation on the rally's reception. setter_position = rotation (setter in
+    P1-P6) of the touch's team. late_set = from 20 (12 in the fifth set).
+    efficiency, in percent of total: serve (# + '+' + '/' - '=' - '-'), reception (# + '+' - '=' - '-'),
+    attack and the other skills (# - '=' - '/')."""
     return await _tool(core.stats, skill=skill, group_by=group_by, player=player, team=team,
                        opponent=opponent, match_id=match_id, skill_type=skill_type, attack_code=attack_code,
-                       start_zone=start_zone, end_zone=end_zone, end_cone=end_cone, end_subzone=end_subzone)
+                       start_zone=start_zone, end_zone=end_zone, end_cone=end_cone, end_subzone=end_subzone,
+                       prev_skill=prev_skill, prev_evaluation=prev_evaluation,
+                       prev_skill_type=prev_skill_type, serve_type=serve_type,
+                       reception_evaluation=reception_evaluation, setter_position=setter_position, late_set=late_set)
 
 
 @mcp.tool()
 async def create_clip(action_ids: list[int] | None = None, tag_ids: list[int] | None = None,
                       caption: str | None = None, title: str | None = None, before_s: float = 4.0,
-                      after_s: float = 4.0, slow_motion: bool = True) -> dict:
+                      after_s: float = 4.0, slow_motion: bool = True,
+                      skill_offsets: dict[str, float] | None = None) -> dict:
     """Make a video clip: one segment per action or tag, in the given order, from before_s seconds before
     to after_s after each touch. slow_motion plays the 2 s around the touch at half speed, muted.
     Each segment gets a caption (default: set, score, player, skill, evaluation; or your caption).
+    skill_offsets shifts each skill's recorded time, e.g. {"Serve": -1.5} if serves were recorded late
+    (default: the server's setting). For whole rallies use the serve with a longer after_s.
     Returns the clip with its status; asking again for the same clip returns the existing one."""
     return await _tool(core.create_clip, action_ids=action_ids, tag_ids=tag_ids, caption=caption, title=title,
-                       before_s=before_s, after_s=after_s, slow_motion=slow_motion)
+                       before_s=before_s, after_s=after_s, slow_motion=slow_motion, skill_offsets=skill_offsets)
+
+
+@mcp.tool()
+async def scout_check(match_id: int | None = None) -> list[dict]:
+    """Staff and management: inconsistencies in the scouting worth checking on video. One finding per rally
+    with rule, set, score, message, the rally codes and action_ids (ready for create_clip). Rules:
+    set_score_mismatch, zones_read_as_cones, winner_vs_last_touch, serve_reception_mismatch,
+    serve_outcome_but_rally_continues, kill_then_play_continues, video_time_goes_back, video_time_gap,
+    serve_types_mixed (a player with more than one serve type in a match: on purpose or a typo?)."""
+    return await _tool(analysis.scout_check, match_id=match_id)
+
+
+@mcp.tool()
+async def phases(team: str | None = None, opponent: str | None = None, match_id: int | None = None,
+                 group_by: str = "none") -> list[dict]:
+    """Rally phases for one team (default: our team): side-out % (receiving rallies won), break-point %
+    (serving rallies won), K1 = first attack after own reception (kill %, error %, efficiency), FBSO =
+    receiving rallies won directly by that first attack, counter-attack (transition attacks while serving),
+    side-out transition attacks, freeball rallies won. group_by: none, match, set or rotation (setter P1-P6)."""
+    return await _tool(analysis.phases, team=team, opponent=opponent, match_id=match_id, group_by=group_by)
+
+
+@mcp.tool()
+async def opponent_report(opponent: str, last_matches: int | None = None) -> dict:
+    """Material to prepare a match against an opponent, from our scouts of their matches: how_they_serve
+    (servers, types, ace/error %, targets), their_reception_by_rotation and by_target_zone (where to serve),
+    setting_distribution (first attack after reception by rotation and reception quality), attackers
+    (kill/error/blocked %, start and end zones), block_and_defence. Write the booklet from these tables."""
+    return await _tool(analysis.opponent_report, opponent=opponent, last_matches=last_matches)
 
 
 @mcp.tool()
@@ -222,6 +277,7 @@ class ClipRequest(BaseModel):
     before_s: float = 4.0
     after_s: float = 4.0
     slow_motion: bool = True
+    skill_offsets: dict[str, float] | None = None
 
 
 @app.get("/healthz", include_in_schema=False)
@@ -261,21 +317,50 @@ async def api_actions(user: UserDep, player: str | None = None, team: str | None
                       evaluation: Annotated[list[str] | None, Query()] = None, skill_type: str | None = None,
                       attack_code: str | None = None, set_number: int | None = None,
                       phase: str | None = None, start_zone: int | None = None, end_zone: int | None = None,
-                      end_cone: int | None = None, end_subzone: str | None = None, limit: int = 100):
+                      end_cone: int | None = None, end_subzone: str | None = None,
+                      prev_skill: str | None = None, prev_evaluation: Annotated[list[str] | None, Query()] = None,
+                      prev_skill_type: str | None = None, serve_type: str | None = None,
+                      reception_evaluation: Annotated[list[str] | None, Query()] = None,
+                      setter_position: int | None = None, late_set: bool | None = None, limit: int = 100):
     return await _run(core.search_actions, user, player=player, team=team, opponent=opponent,
                       match_id=match_id, skill=skill, evaluation=evaluation, skill_type=skill_type,
                       attack_code=attack_code, set_number=set_number, phase=phase, start_zone=start_zone,
-                      end_zone=end_zone, end_cone=end_cone, end_subzone=end_subzone, limit=limit)
+                      end_zone=end_zone, end_cone=end_cone, end_subzone=end_subzone, prev_skill=prev_skill, prev_evaluation=prev_evaluation,
+                      prev_skill_type=prev_skill_type, serve_type=serve_type,
+                      reception_evaluation=reception_evaluation, setter_position=setter_position, late_set=late_set, limit=limit)
 
 
 @app.get("/api/stats")
 async def api_stats(user: UserDep, skill: str, group_by: str = "player", player: str | None = None,
                     team: str | None = None, opponent: str | None = None, match_id: int | None = None,
                     skill_type: str | None = None, attack_code: str | None = None, start_zone: int | None = None,
-                    end_zone: int | None = None, end_cone: int | None = None, end_subzone: str | None = None):
+                    end_zone: int | None = None, end_cone: int | None = None, end_subzone: str | None = None,
+                    prev_skill: str | None = None, prev_evaluation: Annotated[list[str] | None, Query()] = None,
+                    prev_skill_type: str | None = None, serve_type: str | None = None,
+                    reception_evaluation: Annotated[list[str] | None, Query()] = None,
+                    setter_position: int | None = None, late_set: bool | None = None):
     return await _run(core.stats, user, skill=skill, group_by=group_by, player=player, team=team,
                       opponent=opponent, match_id=match_id, skill_type=skill_type, attack_code=attack_code,
-                      start_zone=start_zone, end_zone=end_zone, end_cone=end_cone, end_subzone=end_subzone)
+                      start_zone=start_zone, end_zone=end_zone, end_cone=end_cone, end_subzone=end_subzone,
+                      prev_skill=prev_skill, prev_evaluation=prev_evaluation,
+                      prev_skill_type=prev_skill_type, serve_type=serve_type,
+                      reception_evaluation=reception_evaluation, setter_position=setter_position, late_set=late_set)
+
+
+@app.get("/api/scout-check")
+async def api_scout_check(user: UserDep, match_id: int | None = None):
+    return await _run(analysis.scout_check, user, match_id=match_id)
+
+
+@app.get("/api/phases")
+async def api_phases(user: UserDep, team: str | None = None, opponent: str | None = None,
+                     match_id: int | None = None, group_by: str = "none"):
+    return await _run(analysis.phases, user, team=team, opponent=opponent, match_id=match_id, group_by=group_by)
+
+
+@app.get("/api/opponent-report")
+async def api_opponent_report(user: UserDep, opponent: str, last_matches: int | None = None):
+    return await _run(analysis.opponent_report, user, opponent=opponent, last_matches=last_matches)
 
 
 @app.post("/api/clips")

@@ -12,3 +12,4 @@ if [ -n "$video_key" ]; then
   args+=(--video-key "$name")
 fi
 dc run --rm -T ingest "${args[@]}"
+dc exec -T api volleyhub scout-check --source-file "$(basename "$dvw_key")" || true

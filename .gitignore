@@ -1,0 +1,30 @@
+# Data never goes in the repo
+data/
+videos/
+clips/
+*.dvw
+*.ovs
+*.MOV
+*.mov
+*.mp4
+*.csv
+*.rds
+*.sqlite
+*.duckdb
+backups/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+terraform.tfstate*
+.terraform/
+
+# Tooling
+__pycache__/
+.venv/
+.Rhistory
+.RData
+.DS_Store

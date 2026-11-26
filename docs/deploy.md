@@ -77,7 +77,8 @@ scripts/vh logs                         # today: who called what
 scripts/vh logs --days 7 --user JJ      # last week, one person
 scripts/vh logs --event login           # sign-ins (ok=False = wrong code)
 scripts/vh logs --raw                   # everything, all services
-duckdb -c "select \"user\", tool, count(*) from read_json('s3://<bucket>/logs/events/*.jsonl') where event = 'tool' group by all"
+duckdb -c "create secret (type s3, provider credential_chain, profile 'volley-hub', region 'eu-west-2');
+  select \"user\", tool, count(*) from read_json('s3://<bucket>/logs/events/*.jsonl') where event = 'tool' group by all"
 ```
 
 Roles: `player` sees only their teams' matches; `staff` sees everything and also gets the read-only `query`

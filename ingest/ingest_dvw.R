@@ -118,8 +118,9 @@ invisible(dbWithTransaction(con, {
       visiting_setter_position = first(visiting_setter_position),
       home_lineup = pg_array(c(first(home_p1), first(home_p2), first(home_p3), first(home_p4), first(home_p5), first(home_p6))),
       visiting_lineup = pg_array(c(first(visiting_p1), first(visiting_p2), first(visiting_p3), first(visiting_p4), first(visiting_p5), first(visiting_p6))),
-      video_start_s = suppressWarnings(min(video_time, na.rm = TRUE)),
-      video_end_s = suppressWarnings(max(video_time, na.rm = TRUE)),
+      # From the touches only: setter-position and point rows can carry the time of the rally before.
+      video_start_s = suppressWarnings(min(video_time[!is.na(skill)], na.rm = TRUE)),
+      video_end_s = suppressWarnings(max(video_time[!is.na(skill)], na.rm = TRUE)),
       .groups = "drop"
     ) |>
     mutate(across(c(video_start_s, video_end_s), ~ ifelse(is.finite(.x), .x, NA_real_))) |>

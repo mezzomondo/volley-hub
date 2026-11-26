@@ -9,7 +9,7 @@ Open WebUI, LibreChat, local models...). A plain REST/OpenAPI interface does
 the same for scripts and non-MCP tools. No vendor lock-in: everything runs in
 Docker Compose on one VM.
 
-Status: early design. Nothing here runs yet.
+Status: early. The database schema and the .dvw ingest work locally (see `docs/dev.md`); API, MCP and clip worker are next.
 
 ## Architecture
 

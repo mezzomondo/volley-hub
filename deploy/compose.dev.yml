@@ -1,0 +1,16 @@
+# Local development: only the database for now.
+#   docker compose -f deploy/compose.dev.yml --env-file .env up -d
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: volleyhub
+      POSTGRES_USER: volleyhub
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set it in .env}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+volumes:
+  pgdata:

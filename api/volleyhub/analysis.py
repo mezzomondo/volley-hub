@@ -110,19 +110,24 @@ def scout_check(user: User, *, match_id: int | None = None) -> list[dict]:
 
     # Per match / per player summaries.
     out += db.fetch_all(f"""
+        with s as (
+            select a.match_id, a.person_id, a.shirt_number, a.skill_type, count(*) as n
+            from action a join team tm on tm.id = a.team_id and tm.is_ours
+            where a.skill = 'Serve' group by 1, 2, 3, 4),
+        flagged as (  -- more than one type, and some type outside the ones declared for the player
+            select s.match_id, s.person_id, s.shirt_number from s left join person p on p.id = s.person_id
+            group by 1, 2, 3, p.serve_types
+            having count(*) > 1 and (p.serve_types is null or bool_or(not (s.skill_type = any(p.serve_types)))))
         select 'serve_types_mixed' as rule, m.id as match_id, m.played_on, null::int as set_number, null as score,
                null::int as point_id,
-               coalesce(p.full_name, '#' || a.shirt_number) || ' serves ' ||
-                 string_agg(a.skill_type || ' ' || n, ', ' order by n desc) || ' (one type each, or two on purpose?)' as message,
+               coalesce(p.full_name, '#' || s.shirt_number) || ' serves ' ||
+                 string_agg(s.skill_type || ' ' || s.n, ', ' order by s.n desc) ||
+                 ' (a typo? if the player really uses these, set person.serve_types)' as message,
                null as codes, null::bigint[] as action_ids
-        from (select match_id, person_id, shirt_number, team_id, skill_type, count(*) as n
-              from action where skill = 'Serve' group by 1, 2, 3, 4, 5) a
-        join match m on m.id = a.match_id left join person p on p.id = a.person_id
-        join team tm on tm.id = a.team_id and tm.is_ours
-        where {w} and a.match_id in (select match_id from action where skill = 'Serve' and person_id = a.person_id
-                                     group by match_id having count(distinct skill_type) > 1)
-        group by m.id, m.played_on, p.full_name, a.shirt_number
-        having count(*) > 1""", params)
+        from s join flagged f using (match_id, person_id, shirt_number)
+        join match m on m.id = s.match_id left join person p on p.id = s.person_id
+        where {w}
+        group by m.id, m.played_on, p.full_name, s.shirt_number""", params)
     out += db.fetch_all(f"""
         select 'zones_read_as_cones' as rule, m.id as match_id, m.played_on, null::int as set_number, null as score,
                null::int as point_id,

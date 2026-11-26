@@ -6,6 +6,9 @@
 #   vh squad   --team "Onyx NVL" --season 2026-27 players.csv [--dv-names "Onyx,Onyx London"] [--gender men] [--league "..."]
 #   vh user    create-user --name "Casey Hudson" --role player --team "Onyx NVL"
 #   vh user    list-users | revoke --name ... | rotate-token --name ...
+#   vh admin   scout-check --match-id 2 | set-competition --match-id 2 --competition "NVL Division 2"
+#              | set-serve-types --name "Will Zapata" --types "Jump serve,Jump-float serve"
+#   vh tools <dir>       upload the report scripts (season_lib.R, season_report.R, setter_flow.R) from <dir>
 #   vh update            pull latest code on the server and restart
 #   vh backup            run the backup now
 #   vh run '<command>'   run a shell command on the server (as root)
@@ -83,13 +86,22 @@ case $cmd in
     args=""; for a in "${rest[@]}"; do args+=" $(q "$a")"; done
     remote "/opt/volley-hub/deploy/bin/load-squad.sh $(q "$key")$args"
     ;;
-  user)
+  user|admin)
     args=""; for a in "$@"; do args+=" $(q "$a")"; done
     remote "/opt/volley-hub/deploy/bin/admin.sh$args"
+    ;;
+  tools)
+    dir=${1:-${VH_TOOLS_DIR:-}}
+    [ -n "$dir" ] || { echo "usage: vh tools <folder with season_lib.R, season_report.R, setter_flow.R>" >&2; exit 2; }
+    for f in season_lib.R season_report.R setter_flow.R; do
+      [ -f "$dir/$f" ] || { echo "missing $dir/$f" >&2; exit 2; }
+      aws s3 cp --only-show-errors "$dir/$f" "s3://$BUCKET/tools/$f"
+    done
+    remote "/opt/volley-hub/deploy/bin/sync-tools.sh"
     ;;
   update) remote "/opt/volley-hub/deploy/bin/update.sh" ;;
   backup) remote "/opt/volley-hub/deploy/bin/backup.sh" ;;
   run) remote "$1" ;;
   shell) aws ssm start-session --region "$REGION" --target "$INSTANCE" ;;
-  *) sed -n '2,15p' "$0" ;;
+  *) sed -n '2,18p' "$0" ;;
 esac

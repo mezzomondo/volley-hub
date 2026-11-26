@@ -70,10 +70,11 @@ invisible(dbWithTransaction(con, {
       dbExecute(con, sprintf("delete from %s where match_id = $1", tbl), list(match_id))
     }
     dbExecute(con, "
-      update match set season_id = $1, played_on = $2, competition = $3, home_team_id = $4, visiting_team_id = $5,
+      update match set season_id = coalesce($1, season_id), played_on = $2,
+             competition = case when $12 then $3 else coalesce(competition, $3) end, home_team_id = $4, visiting_team_id = $5,
              home_sets = $6, visiting_sets = $7, set_scores = $8::text[], source_file = $9, source_sha256 = $10,
              ingested_at = now()
-      where id = $11", c(values, list(match_id)))
+      where id = $11", c(values, list(match_id, !is.null(args$competition))))   # a competition set by hand is kept
   } else {
     match_id <- dbGetQuery(con, "
       insert into match (season_id, played_on, competition, home_team_id, visiting_team_id,

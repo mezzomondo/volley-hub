@@ -14,7 +14,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field
 
-from . import analysis, auth, config, core, db, migrate, oauth
+from . import analysis, auth, config, core, db, migrate, oauth, reports
 from .auth import User
 
 # ------------------------------------------------------------------ auth plumbing
@@ -235,6 +235,30 @@ async def opponent_report(opponent: str, last_matches: int | None = None) -> dic
 
 
 @mcp.tool()
+async def create_report(kind: str, team: str | None = None, season: str | None = None, match_id: int | None = None,
+                        format: str = "pdf") -> dict:
+    """Make a report (rendered on the server, like clips): kind 'season' (season report of a team: matches,
+    players, team by match, rotations, attack after reception, setter distribution), 'setter_flow' (setter
+    distribution arrows, pdf or png) or 'match' (match report of one match, needs match_id). team is a partial
+    name (default: our team); season like '2026-27' (default: current). Returns {id, status}; poll get_report
+    until status is 'ready' (usually under a minute), then share its url (valid 7 days). The same request with
+    unchanged data returns the report already made."""
+    return await _tool(reports.create_report, kind=kind, team=team, season=season, match_id=match_id, format=format)
+
+
+@mcp.tool()
+async def get_report(report_id: int) -> dict:
+    """Status of a report; when 'ready' it has a url valid for a week. On 'failed', error says why."""
+    return await _tool(reports.get_report, report_id=report_id)
+
+
+@mcp.tool()
+async def list_reports(mine: bool = False, limit: int = 20) -> list[dict]:
+    """Reports already made, newest first."""
+    return await _tool(reports.list_reports, mine=mine, limit=limit)
+
+
+@mcp.tool()
 async def get_clip(clip_id: int) -> dict:
     """Status of a clip; when status is 'ready' it has a url valid for a week."""
     return await _tool(core.get_clip, clip_id=clip_id)
@@ -363,6 +387,29 @@ async def api_opponent_report(user: UserDep, opponent: str, last_matches: int | 
     return await _run(analysis.opponent_report, user, opponent=opponent, last_matches=last_matches)
 
 
+class ReportRequest(BaseModel):
+    kind: str
+    team: str | None = None
+    season: str | None = None
+    match_id: int | None = None
+    format: str = "pdf"
+
+
+@app.post("/api/reports")
+async def api_create_report(user: UserDep, req: ReportRequest):
+    return await _run(reports.create_report, user, **req.model_dump())
+
+
+@app.get("/api/reports")
+async def api_reports(user: UserDep, mine: bool = False, limit: int = 20):
+    return await _run(reports.list_reports, user, mine=mine, limit=limit)
+
+
+@app.get("/api/reports/{report_id}")
+async def api_report(user: UserDep, report_id: int):
+    return await _run(reports.get_report, user, report_id=report_id)
+
+
 @app.post("/api/clips")
 async def api_create_clip(user: UserDep, req: ClipRequest):
     return await _run(core.create_clip, user, **req.model_dump())
@@ -400,6 +447,16 @@ def media_clip(request: Request, clip_id: int):
     if row is None:
         raise HTTPException(404, "not found")
     return FileResponse(_safe_file(config.CLIP_DIR, row["storage_key"]), media_type="video/mp4")
+
+
+@app.get("/media/reports/{name}", include_in_schema=False)
+def media_report(request: Request, name: str):
+    _require_signature(request)
+    row = db.fetch_one("select storage_key, format from report where storage_key = %s and status = 'ready'", (name,))
+    if row is None:
+        raise HTTPException(404, "not found")
+    media = "application/pdf" if row["format"] == "pdf" else "image/png"
+    return FileResponse(_safe_file(config.REPORT_DIR, row["storage_key"]), media_type=media, filename=name)
 
 
 @app.get("/media/videos/{match_id}", include_in_schema=False)

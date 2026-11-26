@@ -49,6 +49,21 @@ scripts/vh backup     # backup now (it also runs every night at 03:30 UTC)
 scripts/vh shell      # shell on the server
 ```
 
+Reports (asked from any AI with `create_report`) run the coach's R scripts on the server. The scripts are not in
+git: upload them once, and again whenever they change (reports made with older scripts are redone on request):
+
+```sh
+scripts/vh tools ~/path/to/strumenti     # season_lib.R, season_report.R, setter_flow.R
+```
+
+Other admin commands:
+
+```sh
+scripts/vh admin scout-check --match-id 2
+scripts/vh admin set-competition --match-id 2 --competition "NVL Division 2"   # kept across reloads
+scripts/vh admin set-serve-types --name "Will Zapata" --types "Jump serve,Jump-float serve"
+```
+
 Roles: `player` sees only their teams' matches; `management` sees everything; `staff` also gets the
 read-only `query` tool (SQL) and staff notes.
 

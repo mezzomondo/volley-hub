@@ -28,12 +28,29 @@ services:
     volumes:
       - ${DEV_VIDEO_DIR:-./empty}:/data/videos:ro
       - clips:/data/clips
+      - reports:/data/reports:ro
+      - ${DEV_TOOLS_DIR:-./empty}:/data/tools:ro
     depends_on:
       db: {condition: service_healthy}
   worker:
     <<: *app
     command: ["python", "-m", "volleyhub.worker"]
     ports: []
+  reports:
+    build: ../reports
+    platform: linux/amd64       # Google Chrome is amd64 only
+    init: true
+    environment:
+      PGHOST: db
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ${DEV_SCOUT_DIR:-./empty}:/data/scouts:ro
+      - ${DEV_TOOLS_DIR:-./empty}:/data/tools:ro
+      - reports:/data/reports
+    shm_size: "512m"
+    depends_on:
+      db: {condition: service_healthy}
 volumes:
   pgdata:
   clips:
+  reports:

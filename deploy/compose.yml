@@ -13,6 +13,8 @@ x-app: &app
   volumes:
     - ${DATA_DIR}/videos:/data/videos:ro
     - ${DATA_DIR}/clips:/data/clips
+    - ${DATA_DIR}/reports:/data/reports:ro
+    - ${DATA_DIR}/tools:/data/tools:ro
   depends_on:
     db: {condition: service_healthy}
 
@@ -37,6 +39,21 @@ services:
   worker:
     <<: *app
     command: ["python", "-m", "volleyhub.worker"]
+
+  reports:
+    build: ../reports
+    init: true
+    restart: unless-stopped
+    environment:
+      PGHOST: db
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ${DATA_DIR}/scouts:/data/scouts:ro
+      - ${DATA_DIR}/tools:/data/tools:ro
+      - ${DATA_DIR}/reports:/data/reports
+    shm_size: "512m"
+    depends_on:
+      db: {condition: service_healthy}
 
   caddy:
     image: caddy:2

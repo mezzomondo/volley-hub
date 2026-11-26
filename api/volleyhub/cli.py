@@ -37,6 +37,12 @@ def main(argv: list[str] | None = None) -> None:
     k = sub.add_parser("scout-check", help="list scouting inconsistencies of one match")
     k.add_argument("--match-id", type=int)
     k.add_argument("--source-file", help="the .dvw file name the match was loaded from")
+    sc = sub.add_parser("set-competition", help="name the competition of a match (kept when the match is reloaded)")
+    sc.add_argument("--match-id", type=int, required=True)
+    sc.add_argument("--competition", required=True)
+    st = sub.add_parser("set-serve-types", help="serve types a player really uses (scout-check flags only others)")
+    st.add_argument("--name", required=True)
+    st.add_argument("--types", required=True, help='comma separated, e.g. "Jump serve,Jump-float serve"; "" to clear')
     args = ap.parse_args(argv)
 
     if args.cmd == "create-user":
@@ -74,6 +80,15 @@ def main(argv: list[str] | None = None) -> None:
         for f in findings:
             where = f"set {f['set_number']} {f['score']}" if f["score"] else (f"set {f['set_number']}" if f["set_number"] else "")
             print(f"  [{f['rule']}] match {f['match_id']} {where}: {f['message']}")
+    elif args.cmd == "set-competition":
+        with db.conn() as conn:
+            n = conn.execute("update match set competition = %s where id = %s", (args.competition, args.match_id)).rowcount
+        print("ok" if n else "no such match")
+    elif args.cmd == "set-serve-types":
+        types = [t.strip() for t in args.types.split(",") if t.strip()] or None
+        with db.conn() as conn:
+            n = conn.execute("update person set serve_types = %s where lower(full_name) = lower(%s)", (types, args.name)).rowcount
+        print("ok" if n else "no such person")
     elif args.cmd == "rotate-token":
         token = auth.new_token()
         with db.conn() as conn:

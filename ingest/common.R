@@ -49,7 +49,8 @@ parse_pg_array <- function(s) {
 }
 
 sha256_file <- function(path) {
-  out <- system2("shasum", c("-a", "256", shQuote(path)), stdout = TRUE)
+  out <- if (nzchar(Sys.which("sha256sum"))) system2("sha256sum", shQuote(path), stdout = TRUE)
+         else system2("shasum", c("-a", "256", shQuote(path)), stdout = TRUE)
   sub(" .*$", "", out[1])
 }
 

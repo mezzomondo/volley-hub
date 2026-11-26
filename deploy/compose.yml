@@ -1,0 +1,70 @@
+# Production stack. Run from the repo root:
+#   docker compose -f deploy/compose.yml --env-file .env.prod up -d --build
+# All state lives under ${DATA_DIR} (an EBS volume on the server).
+name: volley-hub
+x-app: &app
+  build: ../api
+  init: true
+  restart: unless-stopped
+  environment:
+    DATABASE_URL: postgresql://volleyhub:${POSTGRES_PASSWORD}@db:5432/volleyhub
+    PUBLIC_URL: https://${DOMAIN}
+    SIGNING_KEY: ${SIGNING_KEY}
+  volumes:
+    - ${DATA_DIR}/videos:/data/videos:ro
+    - ${DATA_DIR}/clips:/data/clips
+  depends_on:
+    db: {condition: service_healthy}
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: volleyhub
+      POSTGRES_USER: volleyhub
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?missing}
+    volumes:
+      - ${DATA_DIR}/postgres:/var/lib/postgresql/data
+      - ../db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "volleyhub"]
+      interval: 5s
+
+  api:
+    <<: *app
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "volleyhub.worker"]
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?missing}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ${DATA_DIR}/caddy/data:/data
+      - ${DATA_DIR}/caddy/config:/config
+    depends_on: [api]
+
+  # One-off: docker compose ... run --rm ingest ingest_dvw.R /data/scouts/x.dvw --team "Onyx NVL"
+  ingest:
+    build: ../ingest
+    profiles: [tools]
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: volleyhub
+      PGUSER: volleyhub
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - ${DATA_DIR}/scouts:/data/scouts:ro
+      - ${DATA_DIR}/squads:/data/squads:ro
+    depends_on:
+      db: {condition: service_healthy}

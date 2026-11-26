@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# First boot of the volley-hub server (Ubuntu 24.04). Logs: /var/log/volley-hub-bootstrap.log
+set -euxo pipefail
+exec > >(tee -a /var/log/volley-hub-bootstrap.log) 2>&1
+
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y docker.io docker-compose-v2 git unzip jq curl
+systemctl enable --now docker
+
+# AWS CLI v2
+if ! command -v aws >/dev/null; then
+  curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscli.zip
+  unzip -q /tmp/awscli.zip -d /tmp && /tmp/aws/install && rm -rf /tmp/aws /tmp/awscli.zip
+fi
+export AWS_DEFAULT_REGION=${region}
+
+# Data volume (attached after boot: wait for it). Formatted only if empty.
+DEV=/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_${data_volume_id}
+for i in $(seq 1 120); do [ -e "$DEV" ] && break; sleep 5; done
+[ -e "$DEV" ] || { echo "data volume not attached"; exit 1; }
+if ! blkid "$DEV" >/dev/null 2>&1; then
+  mkfs.ext4 -L vhdata "$DEV"
+fi
+mkdir -p /data
+UUID=$(blkid -s UUID -o value "$DEV")
+grep -q "$UUID" /etc/fstab || echo "UUID=$UUID /data ext4 defaults,nofail 0 2" >> /etc/fstab
+mountpoint -q /data || mount /data
+mkdir -p /data/videos /data/clips /data/postgres /data/caddy/data /data/caddy/config /data/scouts /data/squads
+
+# Code
+if [ ! -d /opt/volley-hub/.git ]; then
+  git clone "${repo_url}" /opt/volley-hub
+fi
+git -C /opt/volley-hub fetch --quiet origin
+git -C /opt/volley-hub checkout --quiet "${repo_ref}"
+
+# Settings and secrets (secrets stay in SSM Parameter Store)
+get() { aws ssm get-parameter --with-decryption --name "$1" --query Parameter.Value --output text; }
+umask 077
+cat > /opt/volley-hub/.env.prod <<ENV
+DATA_DIR=/data
+DOMAIN=${domain}
+BUCKET=${bucket}
+REPO_REF=${repo_ref}
+AWS_DEFAULT_REGION=${region}
+POSTGRES_PASSWORD=$(get /volley-hub/postgres_password)
+SIGNING_KEY=$(get /volley-hub/signing_key)
+ENV
+umask 022
+
+docker compose -f /opt/volley-hub/deploy/compose.yml --env-file /opt/volley-hub/.env.prod up -d --build
+docker compose -f /opt/volley-hub/deploy/compose.yml --env-file /opt/volley-hub/.env.prod --profile tools build ingest
+
+# Nightly backup to S3
+cat > /etc/systemd/system/volley-hub-backup.service <<'UNIT'
+[Unit]
+Description=volley-hub backup to S3
+[Service]
+Type=oneshot
+ExecStart=/opt/volley-hub/deploy/bin/backup.sh
+UNIT
+cat > /etc/systemd/system/volley-hub-backup.timer <<'UNIT'
+[Unit]
+Description=Nightly volley-hub backup
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+Persistent=true
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now volley-hub-backup.timer
+
+echo "volley-hub bootstrap done: https://${domain}"

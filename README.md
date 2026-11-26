@@ -9,7 +9,7 @@ Open WebUI, LibreChat, local models...). A plain REST/OpenAPI interface does
 the same for scripts and non-MCP tools. No vendor lock-in: everything runs in
 Docker Compose on one VM.
 
-Status: early. The database schema and the .dvw ingest work locally (see `docs/dev.md`); API, MCP and clip worker are next.
+Status: early but working: schema, .dvw ingest, REST API, MCP server, clip worker and AWS deployment (see `docs/deploy.md`). Next: web UI and OAuth sign-in.
 
 ## Architecture
 
@@ -27,8 +27,10 @@ backups (restic) ──> object storage
 | `db/` | Postgres schema: seasons, teams, people, per-match shirt numbers, rallies, actions, videos, clips, staff notes. Row-level security for access levels. |
 | `ingest/` | Reads DataVolley `.dvw` files with [datavolley](https://github.com/openvolley/datavolley) and loads them; registers match videos. |
 | `api/` | REST + MCP server: search actions, stats, create/find clips. |
-| `worker/` | ffmpeg jobs: cut clips from match video, captions, slow motion; stores them in the clip library. |
-| `deploy/` | Docker Compose, reverse proxy (HTTPS), auth (OIDC), backups, provisioning. |
+| `api/volleyhub/worker.py` | ffmpeg jobs: cut clips from match video, captions, slow motion; stores them in the clip library. |
+| `deploy/` | Docker Compose (dev and production), Caddy (HTTPS), server scripts (ingest, backup, update). |
+| `infra/terraform/` | AWS: VM, data volume, S3 bucket, IAM, secrets in SSM. |
+| `scripts/vh` | Admin from your computer: publish matches, squads, users, updates. |
 | `docs/` | Design notes. |
 
 ## Principles

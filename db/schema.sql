@@ -150,6 +150,7 @@ create table clip (
                     check (status in ('queued', 'rendering', 'ready', 'failed')),
     storage_key     text,
     duration_s      numeric,
+    error           text,
     created_by      text,
     created_at      timestamptz not null default now()
 );
@@ -168,3 +169,26 @@ create table staff_note (
     body            text not null,
     created_by      text
 );
+
+-- ---------------------------------------------------------------- access
+
+-- API users. Tokens are stored hashed (sha256); the plain token is shown once.
+create table app_user (
+    id          serial primary key,
+    name        text not null unique,
+    role        text not null check (role in ('player', 'management', 'staff')),
+    team_ids    int[] not null default '{}',   -- players: the teams they can see; others: all
+    token_hash  text not null unique,
+    active      boolean not null default true,
+    created_at  timestamptz not null default now()
+);
+
+-- Read-only role for the staff "query" tool (no access to staff notes or users).
+do $$ begin
+  if not exists (select 1 from pg_roles where rolname = 'volleyhub_reader') then
+    create role volleyhub_reader nologin;
+  end if;
+end $$;
+grant usage on schema public to volleyhub_reader;
+grant select on season, team, person, squad_member, match, match_player, video, rally, action, tag, clip, clip_action
+  to volleyhub_reader;

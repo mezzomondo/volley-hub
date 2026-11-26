@@ -2,6 +2,7 @@
 # Load one DataVolley .dvw file into the volley-hub database.
 #
 #   Rscript ingest/ingest_dvw.R <file.dvw> --team "Onyx NVL" [--season 2026-27] [--competition "..."]
+#       [--video-key Onyx_Wessex_2026-11-22.mp4]   (file name in the video store; default: the .dvw's video file name)
 #
 # --team is our team in this match (must exist in the team table, see load_squad.R).
 # Re-running on the same match replaces it (match data is rebuilt from the .dvw).
@@ -16,7 +17,7 @@ suppressPackageStartupMessages({
 
 source(file.path(dirname(normalizePath(sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)))), "common.R"))
 
-args <- parse_args(commandArgs(TRUE), c("team", "season", "competition"))
+args <- parse_args(commandArgs(TRUE), c("team", "season", "competition", "video-key"))
 if (length(args$positional) != 1 || is.null(args$team)) {
   stop("usage: ingest_dvw.R <file.dvw> --team <our team> [--season 2026-27] [--competition ...]")
 }
@@ -55,19 +56,30 @@ invisible(dbWithTransaction(con, {
   team_ids[3 - our_side] <- find_or_create_team(con, dv_teams[3 - our_side])
   home_id <- team_ids[1]; visiting_id <- team_ids[2]
 
-  # Replace any previous load of this match.
-  dbExecute(con, "delete from match where played_on = $1 and home_team_id = $2 and visiting_team_id = $3",
-            list(played_on, home_id, visiting_id))
-
+  # Same match loaded again: keep its id (clips refer to it) and rebuild its contents.
   res <- meta$result
   set_scores <- res$score[!is.na(res$played) & res$played]
-  match_id <- dbGetQuery(con, "
-    insert into match (season_id, played_on, competition, home_team_id, visiting_team_id,
-                       home_sets, visiting_sets, set_scores, source_file, source_sha256)
-    values ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9, $10) returning id",
-    list(season, played_on, competition, home_id, visiting_id,
-         meta$teams$sets_won[1], meta$teams$sets_won[2], pg_array(set_scores),
-         basename(dvw), sha256_file(dvw)))$id
+  values <- list(season, played_on, competition, home_id, visiting_id,
+                 meta$teams$sets_won[1], meta$teams$sets_won[2], pg_array(set_scores),
+                 basename(dvw), sha256_file(dvw))
+  existing <- dbGetQuery(con, "select id from match where played_on = $1 and home_team_id = $2 and visiting_team_id = $3",
+                         list(played_on, home_id, visiting_id))
+  if (nrow(existing)) {
+    match_id <- existing$id
+    for (tbl in c("tag", "action", "rally", "match_player", "video")) {
+      dbExecute(con, sprintf("delete from %s where match_id = $1", tbl), list(match_id))
+    }
+    dbExecute(con, "
+      update match set season_id = $1, played_on = $2, competition = $3, home_team_id = $4, visiting_team_id = $5,
+             home_sets = $6, visiting_sets = $7, set_scores = $8::text[], source_file = $9, source_sha256 = $10,
+             ingested_at = now()
+      where id = $11", c(values, list(match_id)))
+  } else {
+    match_id <- dbGetQuery(con, "
+      insert into match (season_id, played_on, competition, home_team_id, visiting_team_id,
+                         home_sets, visiting_sets, set_scores, source_file, source_sha256)
+      values ($1, $2, $3, $4, $5, $6, $7, $8::text[], $9, $10) returning id", values)$id
+  }
 
   # Players: people by name, shirt numbers per match.
   roster <- bind_rows(
@@ -176,7 +188,9 @@ invisible(dbWithTransaction(con, {
   }
 
   # Video reference (file name only: the video store decides where it lives).
-  if (!is.null(meta$video) && nrow(meta$video)) {
+  if (!is.null(args[["video-key"]])) {
+    dbAppendTable(con, "video", data.frame(match_id = match_id, camera = "Camera0", storage_key = args[["video-key"]]))
+  } else if (!is.null(meta$video) && nrow(meta$video)) {
     dbAppendTable(con, "video", data.frame(
       match_id = match_id,
       camera = meta$video$camera,

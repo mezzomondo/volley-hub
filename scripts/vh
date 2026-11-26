@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# volley-hub admin from your computer. Talks to the server through S3 and AWS Systems Manager
+# (no SSH). Needs: aws CLI (profile in VH_AWS_PROFILE, default "volley-hub"), terraform, ffmpeg.
+#
+#   vh publish --team "Onyx NVL" --dvw match.dvw [--video match.MOV] [--archive-original] [--no-transcode]
+#   vh squad   --team "Onyx NVL" --season 2026-27 players.csv [--dv-names "Onyx,Onyx London"] [--gender men] [--league "..."]
+#   vh user    create-user --name "Casey Hudson" --role player --team "Onyx NVL"
+#   vh user    list-users | revoke --name ... | rotate-token --name ...
+#   vh update            pull latest code on the server and restart
+#   vh backup            run the backup now
+#   vh run '<command>'   run a shell command on the server (as root)
+#   vh shell             interactive shell on the server (needs session-manager-plugin)
+set -euo pipefail
+export AWS_PROFILE=${VH_AWS_PROFILE:-volley-hub}
+HERE=$(cd "$(dirname "$0")" && pwd)
+TF_DIR=${VH_TF_DIR:-$HERE/../infra/terraform}
+
+tf_out() { terraform -chdir="$TF_DIR" output -raw "$1"; }
+BUCKET=$(tf_out bucket)
+INSTANCE=$(tf_out instance_id)
+REGION=$(tf_out region)
+
+slug() { echo "$1" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-//; s/-$//'; }
+q() { printf '%q' "$1"; }
+
+remote() {  # run a command on the server and print its output
+  local cmd=$1 id status
+  id=$(aws ssm send-command --region "$REGION" --instance-ids "$INSTANCE" --document-name AWS-RunShellScript \
+        --comment "vh" --parameters "$(python3 -I -c 'import json,sys; print(json.dumps({"commands":[sys.argv[1]],"executionTimeout":["3600"]}))' "$cmd")" \
+        --query Command.CommandId --output text)
+  while :; do
+    status=$(aws ssm get-command-invocation --region "$REGION" --command-id "$id" --instance-id "$INSTANCE" \
+              --query Status --output text 2>/dev/null || echo Pending)
+    case $status in Pending|InProgress|Delayed) sleep 3 ;; *) break ;; esac
+  done
+  aws ssm get-command-invocation --region "$REGION" --command-id "$id" --instance-id "$INSTANCE" \
+    --query '[StandardOutputContent,StandardErrorContent]' --output text
+  [ "$status" = Success ]
+}
+
+cmd=${1:-help}; shift || true
+case $cmd in
+  publish)
+    team= dvw= video= archive=0 transcode=1
+    while [ $# -gt 0 ]; do case $1 in
+      --team) team=$2; shift 2 ;; --dvw) dvw=$2; shift 2 ;; --video) video=$2; shift 2 ;;
+      --archive-original) archive=1; shift ;; --no-transcode) transcode=0; shift ;;
+      *) echo "unknown option $1" >&2; exit 2 ;; esac; done
+    [ -n "$team" ] && [ -f "$dvw" ] || { echo "need --team and an existing --dvw" >&2; exit 2; }
+    dvw_key="scouts/$(slug "$team")/$(basename "$dvw")"
+    aws s3 cp --only-show-errors "$dvw" "s3://$BUCKET/$dvw_key"
+    video_key=
+    if [ -n "$video" ]; then
+      [ -f "$video" ] || { echo "no such video: $video" >&2; exit 2; }
+      base=$(basename "${video%.*}")
+      video_key="videos/$base.mp4"
+      if [ $transcode = 1 ]; then
+        tmp=$(mktemp -d); out="$tmp/$base.mp4"
+        echo "transcoding to 720p H.264 (hardware encoder)..."
+        ffmpeg -nostdin -v error -stats -i "$video" -map 0:v:0 -map '0:a:0?' -vf scale=-2:720 \
+          -c:v h264_videotoolbox -b:v 3500k -c:a aac -b:a 128k -movflags +faststart "$out"
+      else
+        out=$video
+      fi
+      echo "uploading video..."
+      aws s3 cp "$out" "s3://$BUCKET/$video_key"
+      [ $transcode = 1 ] && rm -rf "$tmp"
+      if [ $archive = 1 ]; then
+        echo "archiving original (Glacier Deep Archive)..."
+        aws s3 cp "$video" "s3://$BUCKET/originals/$(slug "$team")/$(basename "$video")" --storage-class DEEP_ARCHIVE
+      fi
+    fi
+    remote "/opt/volley-hub/deploy/bin/ingest-match.sh $(q "$team") $(q "$dvw_key") $(q "$video_key")"
+    ;;
+  squad)
+    csv= rest=()
+    while [ $# -gt 0 ]; do case $1 in
+      --*) rest+=("$1" "$2"); shift 2 ;; *) csv=$1; shift ;; esac; done
+    [ -f "$csv" ] || { echo "need the squad CSV" >&2; exit 2; }
+    team=; for ((i=0; i<${#rest[@]}; i+=2)); do [ "${rest[i]}" = --team ] && team=${rest[i+1]}; done
+    key="squads/$(slug "${team:-team}")-$(basename "$csv")"
+    aws s3 cp --only-show-errors "$csv" "s3://$BUCKET/$key"
+    args=""; for a in "${rest[@]}"; do args+=" $(q "$a")"; done
+    remote "/opt/volley-hub/deploy/bin/load-squad.sh $(q "$key")$args"
+    ;;
+  user)
+    args=""; for a in "$@"; do args+=" $(q "$a")"; done
+    remote "/opt/volley-hub/deploy/bin/admin.sh$args"
+    ;;
+  update) remote "/opt/volley-hub/deploy/bin/update.sh" ;;
+  backup) remote "/opt/volley-hub/deploy/bin/backup.sh" ;;
+  run) remote "$1" ;;
+  shell) aws ssm start-session --region "$REGION" --target "$INSTANCE" ;;
+  *) sed -n '2,15p' "$0" ;;
+esac

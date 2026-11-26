@@ -167,6 +167,7 @@ invisible(dbWithTransaction(con, {
     start_zone = a$start_zone,
     end_zone = a$end_zone,
     end_subzone = a$end_subzone,
+    end_cone = if ("end_cone" %in% names(a)) a$end_cone else NA_integer_,
     num_players = a$num_players,
     special_code = a$special_code,
     phase = a$phase,

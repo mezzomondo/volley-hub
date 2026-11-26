@@ -129,24 +129,38 @@ async def search_actions(player: str | None = None, team: str | None = None, opp
                          match_id: int | None = None, skill: str | None = None,
                          evaluation: list[str] | None = None, skill_type: str | None = None,
                          attack_code: str | None = None, set_number: int | None = None,
-                         phase: str | None = None, limit: int = 100) -> list[dict]:
+                         phase: str | None = None, start_zone: int | None = None, end_zone: int | None = None,
+                         end_cone: int | None = None, end_subzone: str | None = None,
+                         limit: int = 100) -> list[dict]:
     """Find touches. All filters optional and combined with AND. player/team/opponent are partial names.
     evaluation is a list of codes, e.g. ['=', '/'] for errors and blocked attacks.
-    phase: Serve, Reception (side-out) or Transition. Results with video have a video_url: the match video starting 4 s before the touch (signed link, a file, no page). To watch or share a touch, prefer create_clip."""
+    phase: Serve, Reception (side-out) or Transition. Results with video have a video_url: the match video starting 4 s before the touch (signed link, a file, no page). To watch or share a touch, prefer create_clip.
+    Zones and direction (court zones 1-9): start_zone is where the touch starts (attack: 4 = left, 3 = middle,
+    2 = right, 9/8/7 = back row), end_zone where the ball lands, end_subzone A-D inside that zone. Some scouts
+    record attack direction as end_cone instead of end_zone (DataVolley cones, counted from the start zone):
+    when end_zone is empty, use end_cone."""
     return await _tool(core.search_actions, player=player, team=team, opponent=opponent, match_id=match_id,
                        skill=skill, evaluation=evaluation, skill_type=skill_type, attack_code=attack_code,
-                       set_number=set_number, phase=phase, limit=limit)
+                       set_number=set_number, phase=phase, start_zone=start_zone, end_zone=end_zone,
+                       end_cone=end_cone, end_subzone=end_subzone, limit=limit)
 
 
 @mcp.tool()
 async def stats(skill: str, group_by: str = "player", player: str | None = None, team: str | None = None,
                 opponent: str | None = None, match_id: int | None = None, skill_type: str | None = None,
-                attack_code: str | None = None) -> list[dict]:
+                attack_code: str | None = None, start_zone: int | None = None, end_zone: int | None = None,
+                end_cone: int | None = None, end_subzone: str | None = None) -> list[dict]:
     """Counts per evaluation code and percentages for one skill.
-    group_by: player, team, match, skill_type, attack_code or set_number.
+    group_by: player, team, match, skill_type, attack_code, set_number, start_zone, end_zone, end_cone,
+    end_subzone or direction (start zone with end zone or cone).
+    Zones and direction (court zones 1-9): start_zone is where the touch starts (attack: 4 = left, 3 = middle,
+    2 = right, 9/8/7 = back row), end_zone where the ball lands, end_subzone A-D inside that zone. Some scouts
+    record attack direction as end_cone instead of end_zone (DataVolley cones, counted from the start zone):
+    when end_zone is empty, use end_cone.
     efficiency = (# minus = minus /) / total, in percent (for attack: kill minus errors minus blocked)."""
     return await _tool(core.stats, skill=skill, group_by=group_by, player=player, team=team,
-                       opponent=opponent, match_id=match_id, skill_type=skill_type, attack_code=attack_code)
+                       opponent=opponent, match_id=match_id, skill_type=skill_type, attack_code=attack_code,
+                       start_zone=start_zone, end_zone=end_zone, end_cone=end_cone, end_subzone=end_subzone)
 
 
 @mcp.tool()
@@ -242,18 +256,22 @@ async def api_actions(user: UserDep, player: str | None = None, team: str | None
                       opponent: str | None = None, match_id: int | None = None, skill: str | None = None,
                       evaluation: Annotated[list[str] | None, Query()] = None, skill_type: str | None = None,
                       attack_code: str | None = None, set_number: int | None = None,
-                      phase: str | None = None, limit: int = 100):
+                      phase: str | None = None, start_zone: int | None = None, end_zone: int | None = None,
+                      end_cone: int | None = None, end_subzone: str | None = None, limit: int = 100):
     return await _run(core.search_actions, user, player=player, team=team, opponent=opponent,
                       match_id=match_id, skill=skill, evaluation=evaluation, skill_type=skill_type,
-                      attack_code=attack_code, set_number=set_number, phase=phase, limit=limit)
+                      attack_code=attack_code, set_number=set_number, phase=phase, start_zone=start_zone,
+                      end_zone=end_zone, end_cone=end_cone, end_subzone=end_subzone, limit=limit)
 
 
 @app.get("/api/stats")
 async def api_stats(user: UserDep, skill: str, group_by: str = "player", player: str | None = None,
                     team: str | None = None, opponent: str | None = None, match_id: int | None = None,
-                    skill_type: str | None = None, attack_code: str | None = None):
+                    skill_type: str | None = None, attack_code: str | None = None, start_zone: int | None = None,
+                    end_zone: int | None = None, end_cone: int | None = None, end_subzone: str | None = None):
     return await _run(core.stats, user, skill=skill, group_by=group_by, player=player, team=team,
-                      opponent=opponent, match_id=match_id, skill_type=skill_type, attack_code=attack_code)
+                      opponent=opponent, match_id=match_id, skill_type=skill_type, attack_code=attack_code,
+                      start_zone=start_zone, end_zone=end_zone, end_cone=end_cone, end_subzone=end_subzone)
 
 
 @app.post("/api/clips")

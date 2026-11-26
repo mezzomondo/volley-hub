@@ -104,13 +104,27 @@ def list_tags(user: User, match_id: int | None = None) -> list[dict]:
 
 # ------------------------------------------------------------------ actions
 
+def _zone_filters(where: list[str], params: dict, start_zone, end_zone, end_cone, end_subzone) -> None:
+    """Court zones are 1-9. A scout records the attack direction as end_zone or as end_cone, not both."""
+    for col, value in (("start_zone", start_zone), ("end_zone", end_zone), ("end_cone", end_cone)):
+        if value is not None:
+            where.append(f"a.{col} = %({col})s")
+            params[col] = int(value)
+    if end_subzone:
+        where.append("a.end_subzone = %(end_subzone)s")
+        params["end_subzone"] = end_subzone.upper()
+
+
 def search_actions(user: User, *, player: str | None = None, team: str | None = None,
                    opponent: str | None = None, match_id: int | None = None, skill: str | None = None,
                    evaluation: list[str] | None = None, skill_type: str | None = None,
                    attack_code: str | None = None, set_number: int | None = None,
-                   phase: str | None = None, limit: int = 100) -> list[dict]:
+                   phase: str | None = None, start_zone: int | None = None, end_zone: int | None = None,
+                   end_cone: int | None = None, end_subzone: str | None = None,
+                   limit: int = 100) -> list[dict]:
     vis, params = _visible_matches_clause(user)
     where = [vis]
+    _zone_filters(where, params, start_zone, end_zone, end_cone, end_subzone)
     if player:
         where.append("(p.full_name ilike %(player)s or %(player_exact)s ilike any(p.aliases))")
         params.update(player=f"%{player}%", player_exact=player)
@@ -151,7 +165,7 @@ def search_actions(user: User, *, player: str | None = None, team: str | None = 
                a.home_score_start as home_score, a.visiting_score_start as visiting_score,
                t.name as team, a.shirt_number, p.full_name as player,
                a.skill, a.skill_type, a.evaluation_code, a.evaluation, a.attack_code, a.set_code,
-               a.start_zone, a.end_zone, a.phase, a.video_time_s, a.code,
+               a.start_zone, a.end_zone, a.end_subzone, a.end_cone, a.phase, a.video_time_s, a.code,
                exists (select 1 from video where match_id = a.match_id) as has_video
         from action a
         join match m on m.id = a.match_id
@@ -171,7 +185,8 @@ def search_actions(user: User, *, player: str | None = None, team: str | None = 
 
 def stats(user: User, *, skill: str, group_by: str = "player", player: str | None = None,
           team: str | None = None, opponent: str | None = None, match_id: int | None = None,
-          skill_type: str | None = None, attack_code: str | None = None) -> list[dict]:
+          skill_type: str | None = None, attack_code: str | None = None, start_zone: int | None = None,
+          end_zone: int | None = None, end_cone: int | None = None, end_subzone: str | None = None) -> list[dict]:
     """Counts per evaluation code plus the usual percentages for one skill."""
     groups = {
         "player": [("p.full_name", "player"), ("t.name", "team")],
@@ -180,6 +195,11 @@ def stats(user: User, *, skill: str, group_by: str = "player", player: str | Non
         "skill_type": [("a.skill_type", "skill_type")],
         "attack_code": [("a.attack_code", "attack_code")],
         "set_number": [("a.set_number", "set_number")],
+        "start_zone": [("a.start_zone", "start_zone")],
+        "end_zone": [("a.end_zone", "end_zone")],
+        "end_cone": [("a.end_cone", "end_cone")],
+        "end_subzone": [("a.end_subzone", "end_subzone")],
+        "direction": [("a.start_zone", "start_zone"), ("a.end_zone", "end_zone"), ("a.end_cone", "end_cone")],
     }
     if group_by not in groups:
         raise ValueError(f"group_by must be one of {', '.join(groups)}")
@@ -189,6 +209,7 @@ def stats(user: User, *, skill: str, group_by: str = "player", player: str | Non
     vis, params = _visible_matches_clause(user)
     where = [vis, "a.skill = %(skill)s"]
     params["skill"] = canonical
+    _zone_filters(where, params, start_zone, end_zone, end_cone, end_subzone)
     for key, clause, value in (
         ("player", "p.full_name ilike %(player)s", f"%{player}%" if player else None),
         ("team", "t.name ilike %(team)s", f"%{team}%" if team else None),

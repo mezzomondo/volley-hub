@@ -164,6 +164,14 @@ invisible(dbWithTransaction(con, {
   skills <- c("Serve", "Reception", "Set", "Attack", "Block", "Dig", "Freeball")
   a <- p |> filter(skill %in% skills, point_id %in% rallies$point_id)
   a_team <- team_id_by_name(a$team)
+  # End zone from the end coordinates when the code has none (scouts using cones): serve and attack only,
+  # with clicks just outside the court pulled back to the nearest zone.
+  num <- function(col) if (col %in% names(a)) as.numeric(a[[col]]) else rep(NA_real_, nrow(a))
+  ex <- num("end_coordinate_x"); ey <- num("end_coordinate_y")
+  from_xy <- is.na(a$end_zone) & a$skill %in% c("Serve", "Attack") & !is.na(ex) & !is.na(ey)
+  end_zone <- a$end_zone
+  if (any(from_xy)) end_zone[from_xy] <- dv_xy2zone(pmin(pmax(ex[from_xy], 0.51), 3.49), pmin(pmax(ey[from_xy], 0.51), 6.49))
+  end_zone_source <- ifelse(!is.na(a$end_zone), "code", ifelse(from_xy & !is.na(end_zone), "coordinates", NA_character_))
   dbAppendTable(con, "action", data.frame(
     match_id = match_id,
     point_id = a$point_id,
@@ -179,7 +187,10 @@ invisible(dbWithTransaction(con, {
     attack_code = a$attack_code,
     set_code = a$set_code,
     start_zone = a$start_zone,
-    end_zone = a$end_zone,
+    end_zone = end_zone,
+    end_zone_source = end_zone_source,
+    start_x = round(num("start_coordinate_x"), 3), start_y = round(num("start_coordinate_y"), 3),
+    end_x = round(ex, 3), end_y = round(ey, 3),
     end_subzone = a$end_subzone,
     end_cone = if ("end_cone" %in% names(a)) a$end_cone else NA_integer_,
     num_players = a$num_players,

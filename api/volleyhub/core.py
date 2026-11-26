@@ -165,7 +165,8 @@ def search_actions(user: User, *, player: str | None = None, team: str | None = 
                a.home_score_start as home_score, a.visiting_score_start as visiting_score,
                t.name as team, a.shirt_number, p.full_name as player,
                a.skill, a.skill_type, a.evaluation_code, a.evaluation, a.attack_code, a.set_code,
-               a.start_zone, a.end_zone, a.end_subzone, a.end_cone, a.phase, a.video_time_s, a.code,
+               a.start_zone, a.end_zone, a.end_zone_source, a.end_subzone, a.end_cone,
+               a.start_x, a.start_y, a.end_x, a.end_y, a.phase, a.video_time_s, a.code,
                exists (select 1 from video where match_id = a.match_id) as has_video
         from action a
         join match m on m.id = a.match_id

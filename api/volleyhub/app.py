@@ -137,8 +137,10 @@ async def search_actions(player: str | None = None, team: str | None = None, opp
     phase: Serve, Reception (side-out) or Transition. Results with video have a video_url: the match video starting 4 s before the touch (signed link, a file, no page). To watch or share a touch, prefer create_clip.
     Zones and direction (court zones 1-9): start_zone is where the touch starts (attack: 4 = left, 3 = middle,
     2 = right, 9/8/7 = back row), end_zone where the ball lands, end_subzone A-D inside that zone. Some scouts
-    record attack direction as end_cone instead of end_zone (DataVolley cones, counted from the start zone):
-    when end_zone is empty, use end_cone."""
+    record attack direction as end_cone (DataVolley cones, counted from the start zone) instead of end_zone; for
+    serves and attacks end_zone is then computed from the end coordinates (end_zone_source 'coordinates' instead
+    of 'code': less precise). start_x/start_y/end_x/end_y are court coordinates (x 0.5-3.5 across, y 0.5-6.5
+    along the court, net at y 3.5), for heatmaps."""
     return await _tool(core.search_actions, player=player, team=team, opponent=opponent, match_id=match_id,
                        skill=skill, evaluation=evaluation, skill_type=skill_type, attack_code=attack_code,
                        set_number=set_number, phase=phase, start_zone=start_zone, end_zone=end_zone,
@@ -155,8 +157,10 @@ async def stats(skill: str, group_by: str = "player", player: str | None = None,
     end_subzone or direction (start zone with end zone or cone).
     Zones and direction (court zones 1-9): start_zone is where the touch starts (attack: 4 = left, 3 = middle,
     2 = right, 9/8/7 = back row), end_zone where the ball lands, end_subzone A-D inside that zone. Some scouts
-    record attack direction as end_cone instead of end_zone (DataVolley cones, counted from the start zone):
-    when end_zone is empty, use end_cone.
+    record attack direction as end_cone (DataVolley cones, counted from the start zone) instead of end_zone; for
+    serves and attacks end_zone is then computed from the end coordinates (end_zone_source 'coordinates' instead
+    of 'code': less precise). start_x/start_y/end_x/end_y are court coordinates (x 0.5-3.5 across, y 0.5-6.5
+    along the court, net at y 3.5), for heatmaps.
     efficiency = (# minus = minus /) / total, in percent (for attack: kill minus errors minus blocked)."""
     return await _tool(core.stats, skill=skill, group_by=group_by, player=player, team=team,
                        opponent=opponent, match_id=match_id, skill_type=skill_type, attack_code=attack_code,

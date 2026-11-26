@@ -11,6 +11,8 @@ for line in sys.stdin:
         e = json.loads(line[i:])
     except ValueError:
         continue
+    if not isinstance(e, dict) or "event" not in e or not isinstance(e.get("ts"), str):
+        continue  # other services' JSON (caddy); see --raw
     if user and user not in str(e.get("user", "")).lower():
         continue
     if event and e.get("event") != event:

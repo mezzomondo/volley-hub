@@ -2,10 +2,15 @@
 #   docker compose -f deploy/compose.yml --env-file .env.prod up -d --build
 # All state lives under ${DATA_DIR} (an EBS volume on the server).
 name: volley-hub
+# Local rotation only; deploy/bin/ship-logs.sh copies the lines to S3 every hour.
+x-logging: &logging
+  driver: json-file
+  options: {max-size: "20m", max-file: "5"}
 x-app: &app
   build: ../api
   init: true
   restart: unless-stopped
+  logging: *logging
   environment:
     DATABASE_URL: postgresql://volleyhub:${POSTGRES_PASSWORD}@db:5432/volleyhub
     PUBLIC_URL: https://${DOMAIN}
@@ -22,6 +27,7 @@ services:
   db:
     image: postgres:17
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_DB: volleyhub
       POSTGRES_USER: volleyhub
@@ -44,6 +50,7 @@ services:
     build: ../reports
     init: true
     restart: unless-stopped
+    logging: *logging
     environment:
       PGHOST: db
       PGPASSWORD: ${POSTGRES_PASSWORD}
@@ -58,6 +65,7 @@ services:
   caddy:
     image: caddy:2
     restart: unless-stopped
+    logging: *logging
     environment:
       DOMAIN: ${DOMAIN:?missing}
     ports:
@@ -74,6 +82,7 @@ services:
   ingest:
     build: ../ingest
     profiles: [tools]
+    logging: *logging
     environment:
       PGHOST: db
       PGPORT: "5432"

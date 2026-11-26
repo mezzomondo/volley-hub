@@ -14,7 +14,9 @@ from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field
 
-from . import analysis, auth, config, core, db, migrate, oauth, reports
+import time
+
+from . import analysis, auth, config, core, db, log, migrate, oauth, reports
 from .auth import User
 
 # ------------------------------------------------------------------ auth plumbing
@@ -40,23 +42,41 @@ class AuthMiddleware:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or scope["path"] == "/" or scope["path"].startswith(PUBLIC_PREFIXES):
+        if scope["type"] != "http":
             return await self.app(scope, receive, send)
+        path = scope["path"]
         headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
-        user = await anyio.to_thread.run_sync(_user_for_bearer, auth.bearer(headers))
-        if user is None:
-            body = b'{"detail":"missing or invalid bearer token"}'
-            await send({"type": "http.response.start", "status": 401,
-                        "headers": [(b"content-type", b"application/json"),
-                                    (b"www-authenticate", _WWW_AUTH)]})
-            await send({"type": "http.response.body", "body": body})
-            return
-        scope.setdefault("state", {})["user"] = user
-        token = _current_user.set(user)
+        started, status, user = time.monotonic(), [0], None
+
+        async def send_logged(message):
+            if message["type"] == "http.response.start":
+                status[0] = message["status"]
+            await send(message)
+
         try:
-            await self.app(scope, receive, send)
+            if path == "/" or path.startswith(PUBLIC_PREFIXES):
+                return await self.app(scope, receive, send_logged)
+            user = await anyio.to_thread.run_sync(_user_for_bearer, auth.bearer(headers))
+            if user is None:
+                body = b'{"detail":"missing or invalid bearer token"}'
+                await send_logged({"type": "http.response.start", "status": 401,
+                                   "headers": [(b"content-type", b"application/json"),
+                                               (b"www-authenticate", _WWW_AUTH)]})
+                await send({"type": "http.response.body", "body": body})
+                return
+            scope.setdefault("state", {})["user"] = user
+            token = _current_user.set(user)
+            try:
+                await self.app(scope, receive, send_logged)
+            finally:
+                _current_user.reset(token)
         finally:
-            _current_user.reset(token)
+            if path != "/healthz":  # path only: signed links carry their signature in the query string
+                log.event("http", method=scope.get("method"), path=path, status=status[0] or 500,
+                          ms=round((time.monotonic() - started) * 1000),
+                          user=user.name if user else None, role=user.role if user else None,
+                          ip=(headers.get("x-forwarded-for") or "").split(",")[0].strip() or None,
+                          agent=(headers.get("user-agent") or "")[:120] or None)
 
 
 def current_user() -> User:
@@ -102,7 +122,16 @@ mcp = MCPServer(
 
 async def _tool(fn, **kwargs):
     user = current_user()
-    return await anyio.to_thread.run_sync(lambda: fn(user, **kwargs))
+    started, error = time.monotonic(), None
+    try:
+        return await anyio.to_thread.run_sync(lambda: fn(user, **kwargs))
+    except Exception as e:
+        error = " ".join(f"{type(e).__name__}: {e}".split())
+        raise
+    finally:
+        log.event("tool", tool=fn.__name__, user=user.name, role=user.role,
+                  args={k: log.short(v) for k, v in kwargs.items() if v not in (None, [], "")},
+                  ms=round((time.monotonic() - started) * 1000), ok=error is None, error=log.short(error, 300) if error else None)
 
 
 @mcp.tool()

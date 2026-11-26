@@ -8,4 +8,5 @@ git -C "$REPO" pull --quiet --ff-only || true
 [ -z "${VH_UPDATE_REEXEC:-}" ] && VH_UPDATE_REEXEC=1 exec "$REPO/deploy/bin/update.sh"
 dc up -d --build --remove-orphans
 dc --profile tools build ingest   # the ingest image bakes in the R scripts
+"$REPO/deploy/bin/install-units.sh"
 dc ps

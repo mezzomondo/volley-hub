@@ -64,6 +64,17 @@ scripts/vh admin set-competition --match-id 2 --competition "NVL Division 2"   #
 scripts/vh admin set-serve-types --name "Will Zapata" --types "Jump serve,Jump-float serve"
 ```
 
+Logs: every request, MCP tool call (user, tool, arguments, duration, error) and sign-in is a JSON line in the
+containers' output, rotated on the server and shipped to `s3://<bucket>/logs/YYYY/MM/DD/` every hour (kept 365
+days). Tokens, access codes and signed-link signatures are never logged.
+
+```sh
+scripts/vh logs                         # today: who called what
+scripts/vh logs --days 7 --user JJ      # last week, one person
+scripts/vh logs --event login           # sign-ins (ok=False = wrong code)
+scripts/vh logs --raw                   # everything, all services
+```
+
 Roles: `player` sees only their teams' matches; `management` sees everything; `staff` also gets the
 read-only `query` tool (SQL) and staff notes.
 

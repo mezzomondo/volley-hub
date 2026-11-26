@@ -35,7 +35,7 @@ from mcp.server.auth.routes import build_metadata, cors_middleware, create_auth_
 from mcp.server.auth.settings import ClientRegistrationOptions, RevocationOptions
 from mcp.shared.auth import OAuthClientInformationFull, OAuthToken
 
-from . import auth, config, db
+from . import auth, config, db, log
 
 SCOPE = "volley-hub"
 PENDING_TTL_S = 15 * 60
@@ -260,6 +260,8 @@ async def login_post(request: Request) -> Response:
         return _page("<h1>Link expired</h1><p>Start the connection again from your AI app.</p>", 400)
     user = await _db(auth.user_for_token, code) if code else None
     if user is None:
+        log.event("login", ok=False, client=pending["client_id"],
+                  ip=(request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or None)
         await anyio.sleep(1)  # slow down guessing
         return _form(req, pending, "That code is not valid.")
     params = pending["params"]
@@ -276,6 +278,8 @@ async def login_post(request: Request) -> Response:
             return True
     if not await _db(save):
         return _page("<h1>Link expired</h1><p>Start the connection again from your AI app.</p>", 400)
+    log.event("login", ok=True, user=user.name, role=user.role, client=pending["client_id"],
+              ip=(request.headers.get("x-forwarded-for") or "").split(",")[0].strip() or None)
     location = construct_redirect_uri(params["redirect_uri"], code=auth_code, state=params.get("state"))
     return RedirectResponse(location, status_code=303, headers={"Cache-Control": "no-store"})
 
@@ -290,6 +294,7 @@ async def revoke(request: Request) -> Response:
             row = c.execute("select family from oauth_token where token_hash = %s", (_h(token),)).fetchone()
             if row:
                 c.execute("delete from oauth_token where family = %s", (row["family"],))
+                log.event("oauth_revoke", family=str(row["family"])[:8])
     if token:
         await _db(run)
     return Response(status_code=200, headers={"Cache-Control": "no-store"})

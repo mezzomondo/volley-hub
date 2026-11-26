@@ -9,4 +9,4 @@ COPY volleyhub ./volleyhub
 RUN uv pip install --system --no-cache .
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
-CMD ["uvicorn", "volleyhub.app:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+CMD ["uvicorn", "volleyhub.app:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*", "--no-access-log"]

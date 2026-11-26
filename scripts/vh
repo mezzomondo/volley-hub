@@ -11,6 +11,8 @@
 #   vh tools <dir>       upload the report scripts (season_lib.R, season_report.R, setter_flow.R) from <dir>
 #   vh update            pull latest code on the server and restart
 #   vh backup            run the backup now
+#   vh logs [--date YYYY-MM-DD] [--days N] [--user NAME] [--event tool|http|login] [--raw]
+#                        read the logs shipped to S3 (default: today; who called what)
 #   vh run '<command>'   run a shell command on the server (as root)
 #   vh shell             interactive shell on the server (needs session-manager-plugin)
 set -euo pipefail
@@ -101,6 +103,20 @@ case $cmd in
     ;;
   update) remote "/opt/volley-hub/deploy/bin/update.sh" ;;
   backup) remote "/opt/volley-hub/deploy/bin/backup.sh" ;;
+  logs)
+    day=$(date -u +%Y-%m-%d) days=1 user= event= raw=0
+    while [ $# -gt 0 ]; do case $1 in
+      --date) day=$2; shift 2 ;; --days) days=$2; shift 2 ;; --user) user=$2; shift 2 ;;
+      --event) event=$2; shift 2 ;; --raw) raw=1; shift ;;
+      *) echo "unknown option $1" >&2; exit 2 ;; esac; done
+    tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+    for d in $(python3 -I -c 'import sys,datetime as t; print(" ".join((t.date.fromisoformat(sys.argv[1])-t.timedelta(i)).strftime("%Y/%m/%d") for i in range(int(sys.argv[2]))[::-1]))' "$day" "$days"); do
+      aws s3 cp --quiet --recursive "s3://$BUCKET/logs/$d/" "$tmp/$d/" || true
+    done
+    files=$(find "$tmp" -name '*.log.gz' | sort)
+    [ -n "$files" ] || { echo "no logs in S3 for that period yet (they are shipped at :05 every hour)"; exit 0; }
+    if [ $raw = 1 ]; then echo "$files" | xargs gzip -dc; else echo "$files" | xargs gzip -dc | python3 -I "$HERE/vh-logs.py" "$user" "$event"; fi
+    ;;
   run) remote "$1" ;;
   shell) aws ssm start-session --region "$REGION" --target "$INSTANCE" ;;
   *) sed -n '2,18p' "$0" ;;

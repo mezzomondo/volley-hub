@@ -52,24 +52,7 @@ umask 022
 docker compose -f /opt/volley-hub/deploy/compose.yml --env-file /opt/volley-hub/.env.prod up -d --build
 docker compose -f /opt/volley-hub/deploy/compose.yml --env-file /opt/volley-hub/.env.prod --profile tools build ingest
 
-# Nightly backup to S3
-cat > /etc/systemd/system/volley-hub-backup.service <<'UNIT'
-[Unit]
-Description=volley-hub backup to S3
-[Service]
-Type=oneshot
-ExecStart=/opt/volley-hub/deploy/bin/backup.sh
-UNIT
-cat > /etc/systemd/system/volley-hub-backup.timer <<'UNIT'
-[Unit]
-Description=Nightly volley-hub backup
-[Timer]
-OnCalendar=*-*-* 03:30:00 UTC
-Persistent=true
-[Install]
-WantedBy=timers.target
-UNIT
-systemctl daemon-reload
-systemctl enable --now volley-hub-backup.timer
+# Nightly backup and hourly log shipping to S3
+/opt/volley-hub/deploy/bin/install-units.sh
 
 echo "volley-hub bootstrap done: https://${domain}"

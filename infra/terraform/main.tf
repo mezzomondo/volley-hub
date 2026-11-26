@@ -119,6 +119,17 @@ resource "aws_s3_bucket_lifecycle_configuration" "this" {
   }
 
   rule {
+    id     = "logs-365-days"
+    status = "Enabled"
+    filter {
+      prefix = "logs/"
+    }
+    expiration {
+      days = 365
+    }
+  }
+
+  rule {
     id     = "old-versions-30-days"
     status = "Enabled"
     filter {}

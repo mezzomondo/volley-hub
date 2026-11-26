@@ -98,6 +98,24 @@ def render_clip(clip: dict) -> tuple[str, float]:
     return name, _duration(final)
 
 
+def fill_video_durations() -> None:
+    """Match videos get their duration here (ingest only records the file name)."""
+    with db.conn() as c:
+        rows = c.execute("select id, storage_key from video where duration_s is null and storage_key is not null").fetchall()
+    for r in rows:
+        path = config.VIDEO_DIR / r["storage_key"]
+        if not path.is_file():
+            continue
+        try:
+            d = _duration(path)
+        except (subprocess.CalledProcessError, ValueError) as e:
+            log.warning("no duration for %s: %s", path.name, e)
+            continue
+        with db.conn() as c:
+            c.execute("update video set duration_s = %s where id = %s", (round(d, 2), r["id"]))
+        log.info("video %s: %.0f s", path.name, d)
+
+
 def claim_next() -> dict | None:
     with db.conn() as c:
         return c.execute("""
@@ -113,9 +131,13 @@ def main() -> None:
     with db.conn() as c:
         c.execute("update clip set status = 'queued' where status = 'rendering'")
     log.info("worker started")
+    next_scan = 0.0
     while True:
         clip = claim_next()
         if clip is None:
+            if time.monotonic() >= next_scan:
+                fill_video_durations()
+                next_scan = time.monotonic() + 60
             time.sleep(2)
             continue
         log.info("rendering clip %s (%d segments)", clip["id"], len(clip["spec"]["segments"]))

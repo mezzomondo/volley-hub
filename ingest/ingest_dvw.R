@@ -109,9 +109,9 @@ invisible(dbWithTransaction(con, {
     filter(!is.na(point_id)) |>
     group_by(point_id) |>
     summarise(
-      set_number = first(set_number),
-      home_score_start = first(home_score_start_of_point),
-      visiting_score_start = first(visiting_score_start_of_point),
+      # The set of the first touch: in ovscout2 files the setter-position rows (az3, *z5) that open a set
+      # share the point_id of its first rally but still carry the previous set and its final score.
+      set_number = { s <- set_number[!is.na(skill)]; if (length(s)) s[1] else last(set_number) },
       serving_team = first(na.omit(serving_team)),
       point_won_by = first(na.omit(point_won_by)),
       home_setter_position = first(home_setter_position),
@@ -123,7 +123,20 @@ invisible(dbWithTransaction(con, {
       .groups = "drop"
     ) |>
     mutate(across(c(video_start_s, video_end_s), ~ ifelse(is.finite(.x), .x, NA_real_))) |>
-    filter(!is.na(point_won_by))   # drop pseudo-points (timeouts, substitutions, set ends)
+    filter(!is.na(point_won_by)) |>   # drop pseudo-points (timeouts, substitutions, set ends)
+    # Score at the start of each rally, counted from who won the rallies before it in the same set.
+    arrange(point_id) |>
+    group_by(set_number) |>
+    mutate(home_score_start = lag(cumsum(point_won_by == dv_teams[1]), default = 0L),
+           visiting_score_start = lag(cumsum(point_won_by == dv_teams[2]), default = 0L)) |>
+    ungroup()
+  # The rally winners must add up to the set scores written in the file; if not, the scout has a
+  # point given to the wrong team. Load anyway and say where.
+  counted <- rallies |> group_by(set_number) |>
+    summarise(score = paste0(sum(point_won_by == dv_teams[1]), "-", sum(point_won_by == dv_teams[2])), .groups = "drop")
+  bad <- which(counted$score != set_scores[counted$set_number])
+  for (i in bad) message(sprintf("WARNING set %d: rally winners give %s, the file says %s (a point given to the wrong team?)",
+                                 counted$set_number[i], counted$score[i], set_scores[counted$set_number[i]]))
   staged <- data.frame(
     match_id = match_id,
     point_id = rallies$point_id,
@@ -171,8 +184,8 @@ invisible(dbWithTransaction(con, {
     num_players = a$num_players,
     special_code = a$special_code,
     phase = a$phase,
-    home_score_start = a$home_score_start_of_point,
-    visiting_score_start = a$visiting_score_start_of_point,
+    home_score_start = rallies$home_score_start[match(a$point_id, rallies$point_id)],
+    visiting_score_start = rallies$visiting_score_start[match(a$point_id, rallies$point_id)],
     video_time_s = a$video_time,
     code = a$code
   ))

@@ -15,8 +15,29 @@ data "aws_subnets" "default" {
   }
 }
 
+# Not every AZ offers every instance type (eu-west-2d has no t3a): pick a default subnet in one that does.
+data "aws_ec2_instance_type_offerings" "here" {
+  location_type = "availability-zone"
+  filter {
+    name   = "instance-type"
+    values = [var.instance_type]
+  }
+}
+
+data "aws_subnet" "candidate" {
+  for_each = toset(data.aws_subnets.default.ids)
+  id       = each.value
+}
+
+locals {
+  usable_subnets = sort([
+    for s in data.aws_subnet.candidate : s.id
+    if contains(data.aws_ec2_instance_type_offerings.here.locations, s.availability_zone)
+  ])
+}
+
 data "aws_subnet" "chosen" {
-  id = sort(data.aws_subnets.default.ids)[0]
+  id = local.usable_subnets[0]
 }
 
 data "aws_ssm_parameter" "ubuntu_ami" {

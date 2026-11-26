@@ -3,23 +3,23 @@
 A small, self-hosted hub for a volleyball club's match data and video.
 
 Coaches, players and club staff can search scouted actions, see stats and
-build their own video clips, either from a web page or from any AI assistant
-that speaks [MCP](https://modelcontextprotocol.io) (Claude, ChatGPT, Gemini,
-Open WebUI, LibreChat, local models...). A plain REST/OpenAPI interface does
-the same for scripts and non-MCP tools. No vendor lock-in: everything runs in
+build their own video clips from the AI assistant they already use, through
+[MCP](https://modelcontextprotocol.io) (Claude, ChatGPT, Gemini, Open WebUI,
+LibreChat, local models...). There is no web app to learn: the conversation is
+the interface, and the hub only hands back data and links to clips and video.
+A plain REST/OpenAPI interface does the same for scripts. No vendor lock-in: everything runs in
 Docker Compose on one VM.
 
-Status: early but working: schema, .dvw ingest, REST API, MCP server, clip worker and AWS deployment (see `docs/deploy.md`). Next: web UI and OAuth sign-in.
+Status: early but working: schema, .dvw ingest, REST API, MCP server, clip worker and AWS deployment (see `docs/deploy.md`). Next: OAuth sign-in, so web assistants (claude.ai, ChatGPT) can connect too.
 
 ## Architecture
 
 ```
-            web UI ──┐
-  any MCP client ────┼──> api (REST + MCP) ──> Postgres
+  any MCP client ────┬──> api (REST + MCP) ──> Postgres
   scripts/OpenAPI ───┘          │
                                 └──> worker (ffmpeg) ──> clip library
 ingest (R + datavolley): .dvw + video ──> Postgres + video store
-backups (restic) ──> object storage
+backups (pg_dump + clips) ──> S3
 ```
 
 | Component | What it does |

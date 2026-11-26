@@ -7,8 +7,9 @@ backups go to an S3 bucket. No SSH: admin goes through AWS Systems Manager.
 ## First time
 
 ```sh
+scripts/bootstrap-state.sh            # once: private S3 bucket for the Terraform state, writes backend.hcl
 cd infra/terraform
-terraform init
+terraform init -backend-config=backend.hcl
 terraform plan -out tfplan
 terraform apply tfplan
 ```
@@ -21,7 +22,8 @@ that maps the name to the IP, so Let's Encrypt works without any DNS setup). To 
 A record to `terraform output public_ip`, set `domain` and update `DOMAIN` in `/opt/volley-hub/.env.prod`
 on the server (`vh shell`), then `vh update`.
 
-The data volume has `prevent_destroy`: `terraform destroy` refuses to delete it.
+The Terraform state lives in S3 (versioned, locked with a lock file): it contains the generated
+secrets, so never copy it into the repo. The data volume has `prevent_destroy`: `terraform destroy` refuses to delete it.
 
 ## Day to day (from your computer)
 

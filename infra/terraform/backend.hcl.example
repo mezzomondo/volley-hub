@@ -1,0 +1,3 @@
+# Copy to backend.hcl (git-ignored), or let scripts/bootstrap-state.sh write it.
+bucket  = "volley-hub-tfstate-<account-id>-eu-west-2"
+profile = "volley-hub"

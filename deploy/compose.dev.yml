@@ -30,6 +30,7 @@ services:
       - clips:/data/clips
       - reports:/data/reports:ro
       - ${DEV_TOOLS_DIR:-./empty}:/data/tools:ro
+      - logs:/data/logs
     depends_on:
       db: {condition: service_healthy}
   worker:
@@ -54,3 +55,4 @@ volumes:
   pgdata:
   clips:
   reports:
+  logs:

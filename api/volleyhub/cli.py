@@ -27,7 +27,7 @@ def main(argv: list[str] | None = None) -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("create-user")
     c.add_argument("--name", required=True)
-    c.add_argument("--role", required=True, choices=["player", "management", "staff"])
+    c.add_argument("--role", required=True, choices=["player", "staff", "admin"])
     c.add_argument("--team", action="append", default=[], help="repeatable; required for players")
     sub.add_parser("list-users")
     r = sub.add_parser("revoke")

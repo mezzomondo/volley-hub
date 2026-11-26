@@ -1,17 +1,35 @@
-"""Structured logging: one JSON line per event on stdout. Docker keeps the lines, and an hourly job on the
-server ships them to S3 (logs/). Never log tokens, access codes or signed-link query strings."""
+"""Structured logging: one JSON object per event.
+
+Each event goes to stdout (Docker keeps it with the other services' output) and is appended to
+LOG_DIR/events/YYYY-MM-DD.jsonl, pure JSON lines, which the hourly job syncs to s3://BUCKET/logs/events/ and the
+admin tools read with DuckDB. Never log tokens, access codes or signed-link query strings."""
 
 import json
 import sys
+import threading
 import time
+
+from . import config
+
+_lock = threading.Lock()
 
 
 def event(kind: str, **fields) -> None:
-    line = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime()) + f".{int(time.time() * 1000) % 1000:03d}Z",
+    now = time.time()
+    line = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now)) + f".{int(now * 1000) % 1000:03d}Z",
             "event": kind}
     line.update({k: v for k, v in fields.items() if v is not None})
-    sys.stdout.write(json.dumps(line, default=str, ensure_ascii=False) + "\n")
+    text = json.dumps(line, default=str, ensure_ascii=False) + "\n"
+    sys.stdout.write(text)
     sys.stdout.flush()
+    try:
+        folder = config.LOG_DIR / "events"
+        with _lock:
+            folder.mkdir(parents=True, exist_ok=True)
+            with open(folder / f"{line['ts'][:10]}.jsonl", "a", encoding="utf-8") as f:
+                f.write(text)
+    except OSError as e:  # logging must never break a request
+        sys.stderr.write(f"log file not writable: {e}\n")
 
 
 def short(value, limit: int = 500):

@@ -14,16 +14,22 @@ from . import config, db
 class User:
     id: int
     name: str
-    role: str                      # player | management | staff
+    role: str                      # player | staff | admin
     team_ids: tuple[int, ...] = field(default_factory=tuple)
 
     @property
     def sees_all_teams(self) -> bool:
-        return self.role in ("management", "staff")
+        return self.role in ("staff", "admin")
 
     @property
     def is_staff(self) -> bool:
-        return self.role == "staff"
+        """Staff tools (query, notes, scout checks). Admins have them too."""
+        return self.role in ("staff", "admin")
+
+    @property
+    def is_admin(self) -> bool:
+        """Investigation tools: who used the hub, when and for what."""
+        return self.role == "admin"
 
 
 def hash_token(token: str) -> str:

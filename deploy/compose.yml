@@ -20,6 +20,7 @@ x-app: &app
     - ${DATA_DIR}/clips:/data/clips
     - ${DATA_DIR}/reports:/data/reports:ro
     - ${DATA_DIR}/tools:/data/tools:ro
+    - ${DATA_DIR}/logs:/data/logs
   depends_on:
     db: {condition: service_healthy}
 

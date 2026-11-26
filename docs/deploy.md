@@ -40,7 +40,7 @@ scripts/vh publish --team "Onyx NVL" --dvw 2026-11-22_Onyx_Wessex.dvw --video On
 
 # people
 scripts/vh user create-user --name "Casey Hudson" --role player --team "Onyx NVL"
-scripts/vh user create-user --name "Club Chair" --role management
+scripts/vh user create-user --name "Club Chair" --role staff
 scripts/vh user list-users
 scripts/vh user revoke --name "Casey Hudson"
 
@@ -64,19 +64,25 @@ scripts/vh admin set-competition --match-id 2 --competition "NVL Division 2"   #
 scripts/vh admin set-serve-types --name "Will Zapata" --types "Jump serve,Jump-float serve"
 ```
 
-Logs: every request, MCP tool call (user, tool, arguments, duration, error) and sign-in is a JSON line in the
-containers' output, rotated on the server and shipped to `s3://<bucket>/logs/YYYY/MM/DD/` every hour (kept 365
-days). Tokens, access codes and signed-link signatures are never logged.
+Logs: every request, MCP tool call (user, tool, arguments, duration, error) and sign-in is one JSON object.
+The api writes them to `$DATA_DIR/logs/events/YYYY-MM-DD.jsonl`; every hour (and at shutdown) they are synced to
+`s3://<bucket>/logs/events/`, and all containers' output goes to `s3://<bucket>/logs/raw/`. S3 keeps both 365
+days. Tokens, access codes and signed-link signatures are never logged.
+
+From an AI, admins ask in plain words ("who used volley-hub this week, and for what?"): the `usage_log` and
+`log_query` (DuckDB SQL) tools answer. From your computer:
 
 ```sh
 scripts/vh logs                         # today: who called what
 scripts/vh logs --days 7 --user JJ      # last week, one person
 scripts/vh logs --event login           # sign-ins (ok=False = wrong code)
 scripts/vh logs --raw                   # everything, all services
+duckdb -c "select \"user\", tool, count(*) from read_json('s3://<bucket>/logs/events/*.jsonl') where event = 'tool' group by all"
 ```
 
-Roles: `player` sees only their teams' matches; `management` sees everything; `staff` also gets the
-read-only `query` tool (SQL) and staff notes.
+Roles: `player` sees only their teams' matches; `staff` sees everything and also gets the read-only `query`
+tool (SQL), staff notes and scout checks; `admin` has all of that plus the investigation tools (`usage_log`,
+`log_query`).
 
 ## Connecting an AI assistant (MCP)
 

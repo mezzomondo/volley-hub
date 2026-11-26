@@ -40,8 +40,8 @@ def _team(name: str | None, *, default_ours: bool = False) -> dict:
 
 def scout_check(user: User, *, match_id: int | None = None) -> list[dict]:
     """Inconsistencies a scout should look at, one finding per rally (or per match/player for summaries)."""
-    if not user.sees_all_teams and not user.is_staff:
-        raise Forbidden("scout checks are for staff and management")
+    if not user.is_staff:
+        raise Forbidden("scout checks are for staff")
     vis, params = _visible_matches_clause(user)
     where = [vis]
     if match_id:

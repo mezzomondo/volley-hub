@@ -8,6 +8,7 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "psycopg[binary,pool]>=3.2",
     "mcp>=2.3,<3",
+    "duckdb>=1.1",
 ]
 
 [project.scripts]

@@ -16,6 +16,7 @@ SIGNING_KEY = _env("SIGNING_KEY", "dev-only-signing-key").encode()
 VIDEO_DIR = Path(_env("VIDEO_DIR", "/data/videos"))
 CLIP_DIR = Path(_env("CLIP_DIR", "/data/clips"))
 REPORT_DIR = Path(_env("REPORT_DIR", "/data/reports"))
+LOG_DIR = Path(_env("LOG_DIR", "/data/logs"))  # events/YYYY-MM-DD.jsonl, shipped to S3 hourly
 TOOLS_DIR = Path(_env("TOOLS_DIR", "/data/tools"))  # the coach's report scripts (vh tools)
 FONT_FILE = _env("FONT_FILE", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
 # How long signed media links stay valid.

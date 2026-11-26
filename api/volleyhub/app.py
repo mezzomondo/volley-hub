@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 import time
 
-from . import analysis, auth, config, core, db, log, migrate, oauth, reports
+from . import analysis, auth, config, core, db, log, migrate, oauth, reports, usage, usage
 from .auth import User
 
 # ------------------------------------------------------------------ auth plumbing
@@ -129,7 +129,7 @@ async def _tool(fn, **kwargs):
         error = " ".join(f"{type(e).__name__}: {e}".split())
         raise
     finally:
-        log.event("tool", tool=fn.__name__, user=user.name, role=user.role,
+        log.event("tool", tool={"run_query": "query"}.get(fn.__name__, fn.__name__), user=user.name, role=user.role,
                   args={k: log.short(v) for k, v in kwargs.items() if v not in (None, [], "")},
                   ms=round((time.monotonic() - started) * 1000), ok=error is None, error=log.short(error, 300) if error else None)
 
@@ -238,7 +238,7 @@ async def create_clip(action_ids: list[int] | None = None, tag_ids: list[int] | 
 
 @mcp.tool()
 async def scout_check(match_id: int | None = None) -> list[dict]:
-    """Staff and management: inconsistencies in the scouting worth checking on video. One finding per rally
+    """Staff: inconsistencies in the scouting worth checking on video. One finding per rally
     with rule, set, score, message, the rally codes and action_ids (ready for create_clip). Rules:
     set_score_mismatch, zones_read_as_cones, winner_vs_last_touch, serve_reception_mismatch,
     serve_outcome_but_rally_continues, kill_then_play_continues, video_time_goes_back, video_time_gap,
@@ -306,6 +306,25 @@ async def query(sql: str, limit: int = 200) -> list[dict]:
     """Staff only: read-only SQL over the match data (tables: season, team, person, squad_member, match,
     match_player, video, rally, action, tag, clip, clip_action)."""
     return await _tool(core.run_query, sql=sql, limit=limit)
+
+
+@mcp.tool()
+async def usage_log(days: int = 7, who: str | None = None, event: str | None = None, tool: str | None = None,
+                    group_by: str | None = None, errors_only: bool = False, limit: int = 200) -> list[dict]:
+    """Admin only: who used volley-hub, when and for what. Without group_by, the events newest first; with
+    group_by (comma-separated among user, tool, event, day, ip, status, path) counts, errors, average ms and
+    first/last time. event: tool (MCP calls, with arguments), http (requests incl. rejected ones and media
+    downloads), login (sign-ins; ok=false is a wrong access code), oauth_revoke. who matches the user name."""
+    return await _tool(usage.usage_log, days=days, who=who, event=event, tool=tool, group_by=group_by,
+                       errors_only=errors_only, limit=limit)
+
+
+@mcp.tool(description=(
+    "Admin only: DuckDB SQL over the event log of the last `days` days, in one table: " + usage.SCHEMA_DOC +
+    " args is JSON (e.g. args->>'skill'). Example: select \"user\", tool, count(*) from events "
+    "where event = 'tool' group by all order by 3 desc."))
+async def log_query(sql: str, days: int = 30, limit: int = 500) -> list[dict]:
+    return await _tool(usage.log_query, sql=sql, days=days, limit=limit)
 
 
 # ------------------------------------------------------------------ REST

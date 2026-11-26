@@ -176,7 +176,7 @@ create table staff_note (
 create table app_user (
     id          serial primary key,
     name        text not null unique,
-    role        text not null check (role in ('player', 'management', 'staff')),
+    role        text not null check (role in ('player', 'staff', 'admin')),
     team_ids    int[] not null default '{}',   -- players: the teams they can see; others: all
     token_hash  text not null unique,
     active      boolean not null default true,

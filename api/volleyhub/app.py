@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 
 import time
 
-from . import analysis, auth, config, core, db, library, log, migrate, oauth, reports, usage, usage
+from . import analysis, auth, config, core, db, drawing, library, log, migrate, oauth, reports, usage, usage
 from .auth import User
 
 # ------------------------------------------------------------------ auth plumbing
@@ -351,6 +351,17 @@ async def get_session(session_id: int, diagrams: int = 0) -> list:
     return [result] + [Image(path=p) for p in library.image_paths(result, max(0, min(diagrams, 8)))]
 
 
+@mcp.tool(description=(
+    "Staff: draw a volleyball drill on a court and get a PNG link (valid 7 days) to give the user; the image is "
+    "also returned so you can check it and redraw if something is off. Before drawing a drill from the library, "
+    "look at the coach's own diagrams (get_drill / get_session with diagrams) and follow how he draws it. "
+    + drawing.SPEC_HELP +
+    " Zones: near side zone 4 is front-left as seen from the near baseline; the far side is seen by its own players."))
+async def draw_drill(spec: dict) -> list:
+    result = await _tool(drawing.draw_drill, spec=spec)
+    return [result, Image(path=drawing.drawing_path(result["file"]))]
+
+
 @mcp.tool()
 async def usage_log(days: int = 7, who: str | None = None, event: str | None = None, tool: str | None = None,
                     group_by: str | None = None, errors_only: bool = False, limit: int = 200) -> list[dict]:
@@ -573,6 +584,12 @@ def media_report(request: Request, name: str):
         raise HTTPException(404, "not found")
     media = "application/pdf" if row["format"] == "pdf" else "image/png"
     return FileResponse(_safe_file(config.REPORT_DIR, row["storage_key"]), media_type=media, filename=name)
+
+
+@app.get("/media/drawings/{name}", include_in_schema=False)
+def media_drawing(request: Request, name: str):
+    _require_signature(request)
+    return FileResponse(_safe_file(config.DRAWING_DIR, name), media_type="image/png")
 
 
 @app.get("/media/library/{path:path}", include_in_schema=False)

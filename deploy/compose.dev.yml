@@ -32,6 +32,7 @@ services:
       - ${DEV_TOOLS_DIR:-./empty}:/data/tools:ro
       - logs:/data/logs
       - ${DEV_LIBRARY_DIR:-./empty}:/data/library:ro
+      - drawings:/data/drawings
     depends_on:
       db: {condition: service_healthy}
   worker:
@@ -57,3 +58,4 @@ volumes:
   clips:
   reports:
   logs:
+  drawings:

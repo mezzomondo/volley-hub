@@ -26,7 +26,7 @@ mkdir -p /data
 UUID=$(blkid -s UUID -o value "$DEV")
 grep -q "$UUID" /etc/fstab || echo "UUID=$UUID /data ext4 defaults,nofail 0 2" >> /etc/fstab
 mountpoint -q /data || mount /data
-mkdir -p /data/videos /data/clips /data/reports /data/tools /data/library /data/postgres /data/caddy/data /data/caddy/config /data/scouts /data/squads
+mkdir -p /data/videos /data/clips /data/reports /data/tools /data/library /data/drawings /data/postgres /data/caddy/data /data/caddy/config /data/scouts /data/squads
 
 # Code
 if [ ! -d /opt/volley-hub/.git ]; then

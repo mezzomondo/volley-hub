@@ -13,6 +13,7 @@ Wednesdays in December?". Players have no access.
 | `get_drill(drill, diagrams=3)` | every use of a drill; the first diagrams come back as images the AI can see |
 | `list_sessions(group?, season?, date_from?, date_to?, drill?)` | sessions with their drills in order |
 | `get_session(session_id, diagrams=0)` | one session as planned, block by block |
+| `draw_drill(spec)` | draws a drill on a court (PNG link, 7 days); the AI is told to look at the coach's own diagrams first and follow his style |
 
 ## Where the content comes from
 
@@ -33,7 +34,7 @@ scripts/vh library "~/Documents/Coaching/Season 2025-26" --diagrams   # also the
 ```
 
 Privacy: attendance is never published. The "Players:" line becomes a head count and player pseudonyms become
-"X" in the text. Diagrams and PDFs are uploaded only on request, because handwritten sketches can show names.
+"X" in the text. Diagrams and PDFs are uploaded only on request (`--diagrams`, `--pdfs`), because handwritten sketches can show names; staff-only either way.
 
 ## Adding new sessions
 

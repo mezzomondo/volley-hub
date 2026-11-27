@@ -9,6 +9,7 @@ dependencies = [
     "psycopg[binary,pool]>=3.2",
     "mcp>=2.3,<3",
     "duckdb>=1.1",
+    "matplotlib>=3.9",
 ]
 
 [project.scripts]

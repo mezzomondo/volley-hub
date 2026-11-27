@@ -16,6 +16,7 @@ SIGNING_KEY = _env("SIGNING_KEY", "dev-only-signing-key").encode()
 VIDEO_DIR = Path(_env("VIDEO_DIR", "/data/videos"))
 CLIP_DIR = Path(_env("CLIP_DIR", "/data/clips"))
 REPORT_DIR = Path(_env("REPORT_DIR", "/data/reports"))
+DRAWING_DIR = Path(_env("DRAWING_DIR", "/data/drawings"))  # draw_drill output
 LIBRARY_DIR = Path(_env("LIBRARY_DIR", "/data/library"))  # drill library files (vh library)
 LOG_DIR = Path(_env("LOG_DIR", "/data/logs"))  # events/YYYY-MM-DD.jsonl, shipped to S3 hourly
 TOOLS_DIR = Path(_env("TOOLS_DIR", "/data/tools"))  # the coach's report scripts (vh tools)

@@ -21,6 +21,7 @@ x-app: &app
     - ${DATA_DIR}/reports:/data/reports:ro
     - ${DATA_DIR}/tools:/data/tools:ro
     - ${DATA_DIR}/logs:/data/logs
+    - ${DATA_DIR}/library:/data/library:ro
   depends_on:
     db: {condition: service_healthy}
 

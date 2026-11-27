@@ -9,6 +9,9 @@
 #   vh admin   scout-check --match-id 2 | set-competition --match-id 2 --competition "NVL Division 2"
 #              | set-serve-types --name "Will Zapata" --types "Jump serve,Jump-float serve"
 #   vh tools <dir>       upload the report scripts (season_lib.R, season_report.R, setter_flow.R) from <dir>
+#   vh library <vault> [--diagrams] [--pdfs]
+#                        publish one season of the drill library (Sessions/ + Drills/ Markdown); text only unless
+#                        --diagrams / --pdfs (they may show handwritten names)
 #   vh update            pull latest code on the server and restart
 #   vh backup            run the backup now
 #   vh logs [--date YYYY-MM-DD] [--days N] [--user NAME] [--event tool|http|login] [--raw]
@@ -104,6 +107,25 @@ case $cmd in
     ;;
   update) remote "/opt/volley-hub/deploy/bin/update.sh" ;;
   backup) remote "/opt/volley-hub/deploy/bin/backup.sh" ;;
+  library)
+    vault=${1:-}; shift || true; diagrams=0 pdfs=0
+    while [ $# -gt 0 ]; do case $1 in
+      --diagrams) diagrams=1; shift ;; --pdfs) pdfs=1; shift ;;
+      *) echo "unknown option $1" >&2; exit 2 ;; esac; done
+    [ -d "$vault/Sessions" ] && [ -d "$vault/Drills" ] || { echo "need a vault folder with Sessions/ and Drills/" >&2; exit 2; }
+    tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+    python3 -I "$HERE/library-bundle.py" "$vault" > "$tmp/bundle.json"
+    season=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["season"])' "$tmp/bundle.json")
+    dest="s3://$BUCKET/library/$season"
+    inc=(); [ $diagrams = 1 ] && inc+=(--include "*/img/*.png"); [ $pdfs = 1 ] && inc+=(--include "*.pdf")
+    if [ ${#inc[@]} -gt 0 ]; then
+      aws s3 sync --only-show-errors --delete "$vault/Sessions" "$dest/Sessions" --exclude "*" "${inc[@]}"
+    else
+      aws s3 rm --quiet --recursive "$dest/Sessions" || true
+    fi
+    aws s3 cp --only-show-errors "$tmp/bundle.json" "$dest/bundle.json"
+    remote "/opt/volley-hub/deploy/bin/import-library.sh $(q "$season")"
+    ;;
   logs)
     day=$(date -u +%Y-%m-%d) days=1 user= event= raw=0
     while [ $# -gt 0 ]; do case $1 in

@@ -43,6 +43,8 @@ def main(argv: list[str] | None = None) -> None:
     st = sub.add_parser("set-serve-types", help="serve types a player really uses (scout-check flags only others)")
     st.add_argument("--name", required=True)
     st.add_argument("--types", required=True, help='comma separated, e.g. "Jump serve,Jump-float serve"; "" to clear')
+    il = sub.add_parser("import-library", help="load a season of the drill library (bundle from scripts/library-bundle.py)")
+    il.add_argument("bundle")
     args = ap.parse_args(argv)
 
     if args.cmd == "create-user":
@@ -89,6 +91,9 @@ def main(argv: list[str] | None = None) -> None:
         with db.conn() as conn:
             n = conn.execute("update person set serve_types = %s where lower(full_name) = lower(%s)", (types, args.name)).rowcount
         print("ok" if n else "no such person")
+    elif args.cmd == "import-library":
+        from . import library
+        print(library.import_bundle(args.bundle))
     elif args.cmd == "rotate-token":
         token = auth.new_token()
         with db.conn() as conn:

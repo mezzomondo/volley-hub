@@ -5,7 +5,7 @@ import hmac
 import secrets
 import time
 from dataclasses import dataclass, field
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from . import config, db
 
@@ -69,7 +69,7 @@ def signed_url(path: str, extra: dict | None = None, ttl: int | None = None) -> 
     exp = int(time.time()) + (ttl or config.MEDIA_LINK_TTL_S)
     query = dict(extra or {})
     query.update({"exp": exp, "sig": _sig(path, exp)})
-    return f"{config.PUBLIC_URL}{path}?{urlencode(query)}"
+    return f"{config.PUBLIC_URL}{quote(path)}?{urlencode(query)}"
 
 
 def check_signature(path: str, exp: str | None, sig: str | None) -> bool:

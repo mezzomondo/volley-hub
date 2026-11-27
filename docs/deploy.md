@@ -56,6 +56,12 @@ git: upload them once, and again whenever they change (reports made with older s
 scripts/vh tools ~/path/to/strumenti     # season_lib.R, season_report.R, setter_flow.R
 ```
 
+Drill library (staff only; see [library.md](library.md)):
+
+```sh
+scripts/vh library "~/Documents/Coaching/Season 2025-26"   # publish a season (text only; --diagrams, --pdfs)
+```
+
 Other admin commands:
 
 ```sh

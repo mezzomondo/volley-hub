@@ -31,6 +31,7 @@ services:
       - reports:/data/reports:ro
       - ${DEV_TOOLS_DIR:-./empty}:/data/tools:ro
       - logs:/data/logs
+      - ${DEV_LIBRARY_DIR:-./empty}:/data/library:ro
     depends_on:
       db: {condition: service_healthy}
   worker:

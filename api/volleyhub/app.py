@@ -10,13 +10,13 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from urllib.parse import urlparse
 
-from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver import Image, MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field
 
 import time
 
-from . import analysis, auth, config, core, db, log, migrate, oauth, reports, usage, usage
+from . import analysis, auth, config, core, db, library, log, migrate, oauth, reports, usage, usage
 from .auth import User
 
 # ------------------------------------------------------------------ auth plumbing
@@ -309,6 +309,49 @@ async def query(sql: str, limit: int = 200) -> list[dict]:
 
 
 @mcp.tool()
+async def list_drills(theme: str | None = None) -> list[dict]:
+    """Staff: the drill library, by theme (Warmup, Passing and reception, Serve, Setting, Attack, Block, Defence,
+    Transition, Sideout, Games and wash, Systems and rotations, Conditioning), with how often and when each drill
+    was used. Drills come from the coach's training sessions."""
+    return await _tool(library.list_drills, theme=theme)
+
+
+@mcp.tool()
+async def search_drills(text: str | None = None, theme: str | None = None, group: str | None = None,
+                        season: str | None = None, limit: int = 20) -> list[dict]:
+    """Staff: find drills by words in their name, description and coaching notes (e.g. "jump serve reception
+    traffic light", "block transition"), optionally by theme, training day (group: Wednesday, Thursday, Sunday)
+    or season. Returns each drill with its best-matching use; get_drill shows all uses and the diagrams."""
+    return await _tool(library.search_drills, text=text, theme=theme, group=group, season=season, limit=limit)
+
+
+@mcp.tool()
+async def get_drill(drill: str, diagrams: int = 3) -> list:
+    """Staff: one drill (id, slug or name) with every time it was used: date, training day, duration, summary,
+    the coach's notes and links to the diagrams. The first `diagrams` diagrams are also returned as images so you
+    can see them (0 for none). Player names are never stored: X marks a player in the notes."""
+    result = await _tool(library.get_drill, drill=drill)
+    return [result] + [Image(path=p) for p in library.image_paths(result, max(0, min(diagrams, 8)))]
+
+
+@mcp.tool()
+async def list_sessions(group: str | None = None, season: str | None = None, date_from: str | None = None,
+                        date_to: str | None = None, drill: str | None = None) -> list[dict]:
+    """Staff: training sessions (date, training day, head count, drills in order), filtered by training day,
+    season, dates (YYYY-MM-DD) or a drill they contain."""
+    return await _tool(library.list_sessions, group=group, season=season, date_from=date_from, date_to=date_to,
+                       drill=drill)
+
+
+@mcp.tool()
+async def get_session(session_id: int, diagrams: int = 0) -> list:
+    """Staff: one training session as planned: intro, then each block in order with its drill, duration, summary,
+    the coach's notes and diagram links; `diagrams` > 0 also returns that many diagrams as images."""
+    result = await _tool(library.get_session, session_id=session_id)
+    return [result] + [Image(path=p) for p in library.image_paths(result, max(0, min(diagrams, 8)))]
+
+
+@mcp.tool()
 async def usage_log(days: int = 7, who: str | None = None, event: str | None = None, tool: str | None = None,
                     group_by: str | None = None, errors_only: bool = False, limit: int = 200) -> list[dict]:
     """Admin only: who used volley-hub, when and for what. Without group_by, the events newest first; with
@@ -460,6 +503,29 @@ async def api_report(user: UserDep, report_id: int):
     return await _run(reports.get_report, user, report_id=report_id)
 
 
+@app.get("/api/drills")
+async def api_drills(user: UserDep, text: str | None = None, theme: str | None = None, group: str | None = None,
+                     season: str | None = None, limit: int = 20):
+    return await _run(library.search_drills, user, text=text, theme=theme, group=group, season=season, limit=limit)
+
+
+@app.get("/api/drills/{drill}")
+async def api_drill(user: UserDep, drill: str):
+    return await _run(library.get_drill, user, drill=drill)
+
+
+@app.get("/api/sessions")
+async def api_sessions(user: UserDep, group: str | None = None, season: str | None = None,
+                       date_from: str | None = None, date_to: str | None = None, drill: str | None = None):
+    return await _run(library.list_sessions, user, group=group, season=season, date_from=date_from,
+                      date_to=date_to, drill=drill)
+
+
+@app.get("/api/sessions/{session_id}")
+async def api_session(user: UserDep, session_id: int):
+    return await _run(library.get_session, user, session_id=session_id)
+
+
 @app.post("/api/clips")
 async def api_create_clip(user: UserDep, req: ClipRequest):
     return await _run(core.create_clip, user, **req.model_dump())
@@ -507,6 +573,16 @@ def media_report(request: Request, name: str):
         raise HTTPException(404, "not found")
     media = "application/pdf" if row["format"] == "pdf" else "image/png"
     return FileResponse(_safe_file(config.REPORT_DIR, row["storage_key"]), media_type=media, filename=name)
+
+
+@app.get("/media/library/{path:path}", include_in_schema=False)
+def media_library(request: Request, path: str):
+    q = request.query_params
+    if not auth.check_signature(request.scope["path"], q.get("exp"), q.get("sig")):
+        raise HTTPException(403, "link expired or invalid")
+    file = _safe_file(config.LIBRARY_DIR, path)
+    media = {".png": "image/png", ".pdf": "application/pdf"}.get(file.suffix.lower(), "application/octet-stream")
+    return FileResponse(file, media_type=media)
 
 
 @app.get("/media/videos/{match_id}", include_in_schema=False)
